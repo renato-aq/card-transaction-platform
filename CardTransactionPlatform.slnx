@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/CardPlatform.AppHost/CardPlatform.AppHost.csproj" />
+    <Project Path="src/CardPlatform.Authorization.Api/CardPlatform.Authorization.Api.csproj" />
+    <Project Path="src/CardPlatform.Contracts/CardPlatform.Contracts.csproj" />
+    <Project Path="src/CardPlatform.Fraud.Worker/CardPlatform.Fraud.Worker.csproj" />
+    <Project Path="src/CardPlatform.Ledger.Api/CardPlatform.Ledger.Api.csproj" />
+    <Project Path="src/CardPlatform.ServiceDefaults/CardPlatform.ServiceDefaults.csproj" />
+    <Project Path="src/CardPlatform.Settlement.Job/CardPlatform.Settlement.Job.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/CardPlatform.Authorization.Api.Tests/CardPlatform.Authorization.Api.Tests.csproj" />
+    <Project Path="tests/CardPlatform.Ledger.Api.Tests/CardPlatform.Ledger.Api.Tests.csproj" />
+  </Folder>
+</Solution>
