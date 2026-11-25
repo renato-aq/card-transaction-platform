@@ -1,6 +1,7 @@
 using CardPlatform.Authorization.Application.Abstractions.Ledger;
 using CardPlatform.Authorization.Application.Abstractions.Messaging;
 using CardPlatform.Authorization.Application.Abstractions.Persistence;
+using CardPlatform.Authorization.Application.Authorizations;
 using CardPlatform.Authorization.Application.Cards;
 using CardPlatform.Authorization.Infrastructure.Ledger;
 using CardPlatform.Authorization.Infrastructure.Persistence;
@@ -38,9 +39,11 @@ public static class DependencyInjection
             configureDbContextOptions: static options => AuthorizationDbContextOptions.ApplyConventions(options));
 
         builder.Services.AddScoped<ICardRepository, CardRepository>();
+        builder.Services.AddScoped<IAuthorizationRepository, AuthorizationRepository>();
         builder.Services.AddScoped<IUnitOfWork>(static services => services.GetRequiredService<AuthorizationDbContext>());
 
         builder.Services.AddScoped<IQueryHandler<GetCard, CardDto>, GetCardHandler>();
+        builder.Services.AddScoped<IQueryHandler<GetAuthorization, AuthorizationDto>, GetAuthorizationHandler>();
 
         builder.Services.AddLedgerClient();
 

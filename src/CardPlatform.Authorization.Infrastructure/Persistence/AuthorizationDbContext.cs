@@ -1,4 +1,5 @@
 using CardPlatform.Authorization.Application.Abstractions.Persistence;
+using CardPlatform.Authorization.Domain.Authorizations;
 using CardPlatform.Authorization.Domain.Cards;
 
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,8 @@ namespace CardPlatform.Authorization.Infrastructure.Persistence;
 public sealed class AuthorizationDbContext(DbContextOptions<AuthorizationDbContext> options) : DbContext(options), IUnitOfWork
 {
     public DbSet<Card> Cards => Set<Card>();
+
+    public DbSet<CardAuthorization> Authorizations => Set<CardAuthorization>();
 
     async Task IUnitOfWork.SaveChangesAsync(CancellationToken cancellationToken)
     {

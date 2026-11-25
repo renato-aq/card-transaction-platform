@@ -9,6 +9,9 @@ namespace CardPlatform.Authorization.Infrastructure.Persistence.Configurations;
 /// </summary>
 internal static class AuthorizationConverters
 {
+    /// <summary>Column type for every amount: two decimal places, as enforced by <see cref="Money"/>.</summary>
+    public const string AmountColumnType = "numeric(18,2)";
+
     /// <summary>Column type for ISO 4217 currency codes.</summary>
     public const string CurrencyColumnType = "char(3)";
 
