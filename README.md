@@ -246,9 +246,17 @@ Authorize a purchase, paid to a merchant account opened in the Ledger (`POST /ac
 
 ```bash
 curl -s -X POST "$AUTHZ/authorizations" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $(uuidgen)" \
   -d "{\"cardId\":\"$CARD_ID\",\"merchantAccountId\":\"$MERCHANT_ID\",\"amount\":30.00,\"currency\":\"BRL\"}"
 curl -s "$AUTHZ/authorizations/<id>"
 ```
+
+Every purchase needs an `Idempotency-Key` header, unique per purchase
+([ADR 0008](docs/adr/0008-make-purchase-authorization-idempotent.md)). Sending the same purchase again with the same
+key returns exactly the recorded response without a second hold; the same key with a different body is `422`
+`idempotency_key_reused`, and while the first request is still running the answer is `409`
+`idempotency_request_in_progress`. A missing key is `400` `idempotency_key_required`. Failures are not recorded: after
+a `503` the same key processes the purchase again, reusing the authorization (and hold) id reserved for it.
 
 An approved purchase holds the amount in the Ledger (the hold id is the authorization id), so the card balance drops by
 it. A decline is a business outcome, not an HTTP error: both answer `201 Created` with
@@ -315,3 +323,5 @@ See [docs/adr](docs/adr) for the reasoning behind the main technical choices:
 4. [Use hexagonal architecture with pragmatic CQRS](docs/adr/0004-use-hexagonal-architecture-with-pragmatic-cqrs.md)
 5. [Use a double-entry ledger model](docs/adr/0005-use-double-entry-ledger-model.md)
 6. [Use optimistic concurrency for ledger accounts](docs/adr/0006-use-optimistic-concurrency-for-ledger-accounts.md)
+7. [Model authorization holds in the ledger](docs/adr/0007-model-authorization-holds-in-the-ledger.md)
+8. [Make purchase authorization idempotent](docs/adr/0008-make-purchase-authorization-idempotent.md)
