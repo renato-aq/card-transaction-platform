@@ -1,10 +1,11 @@
 using System.Net;
-using Microsoft.AspNetCore.Mvc.Testing;
+
+using CardPlatform.Ledger.Api.Tests.Infrastructure;
 
 namespace CardPlatform.Ledger.Api.Tests;
 
-public class HealthCheckTests(WebApplicationFactory<Program> factory)
-    : IClassFixture<WebApplicationFactory<Program>>
+[Collection(LedgerApiCollectionFixture.Name)]
+public class HealthCheckTests(LedgerApiFactory factory)
 {
     [Fact]
     public async Task Health_endpoint_returns_ok()
