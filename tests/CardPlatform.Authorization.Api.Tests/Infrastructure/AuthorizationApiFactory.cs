@@ -74,6 +74,17 @@ public sealed class AuthorizationApiFactory : WebApplicationFactory<Program>, IA
                 .ConfigurePrimaryHttpMessageHandler(static () => new UnreachableLedgerHandler())));
     }
 
+    /// <summary>
+    /// A copy of this API, sharing the same database, whose Ledger client reaches the Ledger but never gets the reply to
+    /// placing a hold: the hold is placed, yet the client sees a dropped connection on every attempt.
+    /// </summary>
+    public WebApplicationFactory<Program> WithLedgerReplyLost()
+    {
+        return WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddHttpClient(DependencyInjection.LedgerHttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() => new LostReplyLedgerHandler(Ledger.Server.CreateHandler()))));
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting($"ConnectionStrings:{DependencyInjection.ConnectionName}", _postgres.GetConnectionString());

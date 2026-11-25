@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 
 using CardPlatform.Authorization.Api.Endpoints;
 using CardPlatform.Authorization.Application;
+using CardPlatform.Authorization.Application.Idempotency;
 using CardPlatform.Authorization.Infrastructure;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -11,6 +12,7 @@ builder.AddServiceDefaults();
 builder.AddAuthorizationInfrastructure();
 builder.Services.AddAuthorizationApplication();
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton<IAuthorizationResponseFactory, AuthorizationResponseFactory>();
 
 // Enums travel as camelCase strings (e.g. "blocked"), both in requests and responses.
 builder.Services.ConfigureHttpJsonOptions(static options =>

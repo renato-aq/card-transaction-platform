@@ -13,9 +13,11 @@ using Microsoft.Extensions.DependencyInjection;
 namespace CardPlatform.Authorization.Api.Tests.Authorizations;
 
 [Collection(AuthorizationApiCollectionFixture.Name)]
-public class AuthorizationEndpointsTests(AuthorizationApiFactory factory)
+public partial class AuthorizationEndpointsTests(AuthorizationApiFactory factory)
 {
     private const string ProblemJson = "application/problem+json";
+
+    private const string IdempotencyKeyHeader = "Idempotency-Key";
 
     private readonly HttpClient _client = factory.CreateClient();
     private readonly HttpClient _ledger = factory.Ledger.CreateClient();
@@ -124,7 +126,7 @@ public class AuthorizationEndpointsTests(AuthorizationApiFactory factory)
         (Guid cardId, _) = await CreateFundedCardAsync(100m);
         int before = await CountAuthorizationsAsync();
 
-        HttpResponseMessage response = await _client.PostAsJsonAsync("/authorizations", new
+        HttpResponseMessage response = await PostAuthorizationAsync(new
         {
             cardId,
             merchantAccountId = Guid.NewGuid(),
@@ -139,11 +141,9 @@ public class AuthorizationEndpointsTests(AuthorizationApiFactory factory)
     [Fact]
     public async Task Missing_ids_return_bad_request_with_code()
     {
-        HttpResponseMessage noCard = await _client.PostAsJsonAsync(
-            "/authorizations",
+        HttpResponseMessage noCard = await PostAuthorizationAsync(
             new { merchantAccountId = Guid.NewGuid(), amount = 10m, currency = "BRL" });
-        HttpResponseMessage noMerchant = await _client.PostAsJsonAsync(
-            "/authorizations",
+        HttpResponseMessage noMerchant = await PostAuthorizationAsync(
             new { cardId = Guid.NewGuid(), amount = 10m, currency = "BRL" });
 
         await AssertProblemAsync(noCard, HttpStatusCode.BadRequest, "invalid_card_id");
@@ -157,9 +157,13 @@ public class AuthorizationEndpointsTests(AuthorizationApiFactory factory)
     [InlineData("")]
     public async Task Malformed_body_returns_bad_request_problem(string json)
     {
-        using StringContent content = new(json, Encoding.UTF8, "application/json");
+        using HttpRequestMessage request = new(HttpMethod.Post, "/authorizations")
+        {
+            Content = new StringContent(json, Encoding.UTF8, "application/json"),
+        };
+        request.Headers.Add(IdempotencyKeyHeader, NewIdempotencyKey());
 
-        HttpResponseMessage response = await _client.PostAsync("/authorizations", content);
+        HttpResponseMessage response = await _client.SendAsync(request);
 
         Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
         Assert.Equal(ProblemJson, response.Content.Headers.ContentType?.MediaType);
@@ -191,8 +195,9 @@ public class AuthorizationEndpointsTests(AuthorizationApiFactory factory)
         int before = await CountAuthorizationsAsync();
         using WebApplicationFactory<Program> ledgerDown = factory.WithLedgerDown();
 
-        HttpResponseMessage response = await ledgerDown.CreateClient()
-            .PostAsJsonAsync("/authorizations", new { cardId, merchantAccountId = Guid.NewGuid(), amount = 30m, currency = "BRL" });
+        HttpResponseMessage response = await PostAuthorizationAsync(
+            new { cardId, merchantAccountId = Guid.NewGuid(), amount = 30m, currency = "BRL" },
+            client: ledgerDown.CreateClient());
 
         await AssertProblemAsync(response, HttpStatusCode.ServiceUnavailable, "ledger_unavailable");
         Assert.Equal(before, await CountAuthorizationsAsync());
@@ -201,7 +206,27 @@ public class AuthorizationEndpointsTests(AuthorizationApiFactory factory)
 
     private Task<HttpResponseMessage> AuthorizeAsync(Guid cardId, Guid merchantAccountId, decimal amount, string currency)
     {
-        return _client.PostAsJsonAsync("/authorizations", new { cardId, merchantAccountId, amount, currency });
+        return PostAuthorizationAsync(new { cardId, merchantAccountId, amount, currency });
+    }
+
+    /// <summary>
+    /// Sends <c>POST /authorizations</c> with <paramref name="body"/> and the <c>Idempotency-Key</c>
+    /// <paramref name="idempotencyKey"/> (a new key when it is <see langword="null"/>), through <paramref name="client"/>
+    /// (this API's client by default).
+    /// </summary>
+    private async Task<HttpResponseMessage> PostAuthorizationAsync(
+        object body,
+        string? idempotencyKey = null,
+        HttpClient? client = null)
+    {
+        using HttpRequestMessage request = new(HttpMethod.Post, "/authorizations") { Content = JsonContent.Create(body) };
+        request.Headers.Add(IdempotencyKeyHeader, idempotencyKey ?? NewIdempotencyKey());
+        return await (client ?? _client).SendAsync(request);
+    }
+
+    private static string NewIdempotencyKey()
+    {
+        return Guid.NewGuid().ToString();
     }
 
     /// <summary>Creates a BRL card and tops its Ledger card account up from a settlement account.</summary>
