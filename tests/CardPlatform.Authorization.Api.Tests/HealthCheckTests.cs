@@ -1,10 +1,11 @@
 using System.Net;
-using Microsoft.AspNetCore.Mvc.Testing;
+
+using CardPlatform.Authorization.Api.Tests.Infrastructure;
 
 namespace CardPlatform.Authorization.Api.Tests;
 
-public class HealthCheckTests(WebApplicationFactory<Program> factory)
-    : IClassFixture<WebApplicationFactory<Program>>
+[Collection(AuthorizationApiCollectionFixture.Name)]
+public class HealthCheckTests(AuthorizationApiFactory factory)
 {
     [Fact]
     public async Task Health_endpoint_returns_ok()
