@@ -39,6 +39,18 @@ public class AuthorizePurchaseHandlerTests
     }
 
     [Fact]
+    public async Task Given_authorization_id_is_used_for_the_authorization_and_the_hold()
+    {
+        Guid reservedId = Guid.CreateVersion7();
+
+        Result<AuthorizationDto> result = await CreateHandler().HandleAsync(Purchase(30m, "BRL") with { AuthorizationId = reservedId });
+
+        Assert.Equal(reservedId, result.Value.Id);
+        Assert.Equal(reservedId, Assert.Single(_authorizations.Added).Id);
+        Assert.Equal(reservedId, Assert.Single(_ledger.PlacedHolds).HoldId);
+    }
+
+    [Fact]
     public async Task Blocked_card_is_declined_without_calling_the_ledger()
     {
         _card.Block();

@@ -25,10 +25,12 @@ namespace CardPlatform.Authorization.Application.Authorizations;
 /// recorded. The merchant account is only checked for format: the Ledger checks it when the authorization is captured.
 /// </summary>
 /// <remarks>
-/// The authorization id is chosen once, before the Ledger is called, because it is also the hold id. Placing a hold is
-/// idempotent by id in the Ledger, so the client may retry it safely. If the hold was placed but the answer was lost
+/// The authorization id is chosen once, before the Ledger is called, because it is also the hold id: it is
+/// <see cref="AuthorizePurchase.AuthorizationId"/> when given, otherwise a new one. Placing a hold is idempotent by id
+/// in the Ledger, so the client may retry it safely. If the hold was placed but the answer was lost
 /// (<see cref="LedgerErrors.UnavailableCode"/>) or the save fails, the hold stays pending in the Ledger with no
-/// authorization; a retry of the same purchase only reuses it if it is given the same id.
+/// authorization; a retry of the same purchase reuses it because the idempotency layer gives it the same id
+/// (see <see cref="Idempotency.IdempotentAuthorizePurchaseHandler"/>, ADR 0008).
 /// </remarks>
 public sealed class AuthorizePurchaseHandler(
     ILedgerClient ledger,
@@ -66,7 +68,7 @@ public sealed class AuthorizePurchaseHandler(
         }
 
         DateTimeOffset now = timeProvider.GetUtcNow();
-        Guid authorizationId = CardAuthorization.NewId(now);
+        Guid authorizationId = command.AuthorizationId ?? CardAuthorization.NewId(now);
 
         if (CardAuthorization.CheckCard(card, amount.Value) is { } reason)
         {
