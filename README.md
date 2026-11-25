@@ -272,6 +272,28 @@ Checks run in this order: input validation (`400`: `invalid_card_id`, `invalid_m
 `insufficient_funds`). The merchant account is only checked for format here; the Ledger checks it on capture. If the
 Ledger cannot be reached the answer is `503` `ledger_unavailable` and nothing is recorded.
 
+Close the purchase by capturing the authorization (the held amount goes to its merchant account) or voiding it (the
+held amount goes back to the card). Neither takes a body:
+
+```bash
+curl -s -X POST "$AUTHZ/authorizations/<id>/capture"
+curl -s -X POST "$AUTHZ/authorizations/<id>/void"
+```
+
+Both answer `200 OK` with the authorization, now `"status":"captured"` or `"status":"voided"`, and a `completedAt`
+timestamp (`null` until then). Only `approved` authorizations can be completed: a declined, captured or voided one is
+`422` `authorization_not_capturable` / `authorization_not_voidable`, and the Ledger is not called. An unknown id is
+`404` `authorization_not_found`; if the Ledger cannot be reached the answer is `503` `ledger_unavailable` and the
+authorization stays `approved`. Other Ledger errors keep their code (e.g. `404` `account_not_found` or `422`
+`not_a_merchant_account` when the merchant account is wrong) and leave the authorization unchanged.
+
+Capture and void are not idempotent in the Ledger, so after an unknown outcome (a `503` whose request did reach the
+Ledger) the next attempt gets `hold_not_pending`. The Authorization then reads the hold and follows it: if the hold
+was already completed the same way, the authorization is marked so and the call succeeds; if it was completed the other
+way (e.g. voided when capturing), the authorization takes that status and the call is `422`
+`authorization_not_capturable` / `authorization_not_voidable`. Retrying a capture or void is therefore safe, and no
+idempotency key is needed.
+
 ## Project structure
 
 ```
