@@ -19,6 +19,7 @@
     <Project Path="tests/CardPlatform.Authorization.Api.Tests/CardPlatform.Authorization.Api.Tests.csproj" />
     <Project Path="tests/CardPlatform.Authorization.Application.Tests/CardPlatform.Authorization.Application.Tests.csproj" />
     <Project Path="tests/CardPlatform.Authorization.Domain.Tests/CardPlatform.Authorization.Domain.Tests.csproj" />
+    <Project Path="tests/CardPlatform.Authorization.Infrastructure.Tests/CardPlatform.Authorization.Infrastructure.Tests.csproj" />
     <Project Path="tests/CardPlatform.Ledger.Api.Tests/CardPlatform.Ledger.Api.Tests.csproj" />
     <Project Path="tests/CardPlatform.Ledger.Application.Tests/CardPlatform.Ledger.Application.Tests.csproj" />
     <Project Path="tests/CardPlatform.Ledger.Domain.Tests/CardPlatform.Ledger.Domain.Tests.csproj" />
