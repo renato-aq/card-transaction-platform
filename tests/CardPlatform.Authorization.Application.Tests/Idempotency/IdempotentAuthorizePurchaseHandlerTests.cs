@@ -59,6 +59,20 @@ public class IdempotentAuthorizePurchaseHandlerTests
     }
 
     [Fact]
+    public async Task Claim_lease_and_completion_times_are_written_in_whole_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds.
+        Result<StoredResponse> result = await CreateHandler(new FixedTimeProvider(Now.AddTicks(7)))
+            .HandleAsync(new IdempotentAuthorizePurchase(Key, _purchase));
+
+        Assert.True(result.IsSuccess);
+        IdempotencyClaim claim = Assert.Single(_keys.Claims);
+        Assert.Equal(Now, claim.ClaimedAt);
+        Assert.Equal(Now + IdempotentAuthorizePurchaseHandler.LeaseDuration, claim.LockedUntil);
+        Assert.Equal(Now, Assert.Single(_keys.CompletedAt));
+    }
+
+    [Fact]
     public async Task Repeated_key_returns_the_stored_response_without_processing_again()
     {
         Result<StoredResponse> first = await CreateHandler().HandleAsync(new IdempotentAuthorizePurchase(Key, _purchase));
@@ -184,13 +198,13 @@ public class IdempotentAuthorizePurchaseHandlerTests
         Assert.Equal(IdempotencyErrors.RequestInProgress, result.Error);
     }
 
-    private IdempotentAuthorizePurchaseHandler CreateHandler()
+    private IdempotentAuthorizePurchaseHandler CreateHandler(TimeProvider? timeProvider = null)
     {
         return new IdempotentAuthorizePurchaseHandler(
             _inner,
             _keys,
             _unitOfWork,
             new FakeResponseFactory(),
-            new FixedTimeProvider(Now));
+            timeProvider ?? new FixedTimeProvider(Now));
     }
 }

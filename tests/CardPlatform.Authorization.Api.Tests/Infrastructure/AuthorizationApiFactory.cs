@@ -87,6 +87,12 @@ public sealed class AuthorizationApiFactory : WebApplicationFactory<Program>, IA
                     new LostReplyLedgerHandler(Ledger.Server.CreateHandler(), losesReply))));
     }
 
+    /// <summary>A copy of this API, sharing the same database, that reads the time from <paramref name="clock"/>.</summary>
+    public WebApplicationFactory<Program> WithClock(TimeProvider clock)
+    {
+        return WithWebHostBuilder(builder => builder.ConfigureTestServices(services => services.AddSingleton(clock)));
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseSetting($"ConnectionStrings:{DependencyInjection.ConnectionName}", _postgres.GetConnectionString());

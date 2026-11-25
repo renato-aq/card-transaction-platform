@@ -1,3 +1,4 @@
+using CardPlatform.Authorization.Domain.Common;
 using CardPlatform.Authorization.Domain.Monetary;
 
 namespace CardPlatform.Authorization.Domain.Cards;
@@ -15,7 +16,7 @@ public sealed class Card
         LedgerAccountId = ledgerAccountId;
         Currency = currency;
         Status = CardStatus.Active;
-        CreatedAt = createdAt;
+        CreatedAt = createdAt.TruncateToMicroseconds();
     }
 
     public Guid Id { get; }
@@ -28,6 +29,7 @@ public sealed class Card
 
     public CardStatus Status { get; private set; }
 
+    /// <summary>When the card was created, in whole microseconds (see <see cref="Timestamps"/>).</summary>
     public DateTimeOffset CreatedAt { get; }
 
     /// <summary>

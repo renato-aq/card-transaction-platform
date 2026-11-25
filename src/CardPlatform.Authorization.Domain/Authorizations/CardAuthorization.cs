@@ -36,7 +36,7 @@ public sealed class CardAuthorization
         Amount = amount;
         Status = status;
         DeclineReason = declineReason;
-        CreatedAt = createdAt;
+        CreatedAt = createdAt.TruncateToMicroseconds();
     }
 
     // Used only to rehydrate persisted authorizations: Amount is set right after construction.
@@ -72,10 +72,12 @@ public sealed class CardAuthorization
     /// <summary>Why the purchase was declined; <see langword="null"/> unless it is declined.</summary>
     public DeclineReason? DeclineReason { get; }
 
+    /// <summary>When the authorization was decided, in whole microseconds (see <see cref="Timestamps"/>).</summary>
     public DateTimeOffset CreatedAt { get; }
 
     /// <summary>
-    /// When the authorization was captured or voided; <see langword="null"/> while it is approved or when declined.
+    /// When the authorization was captured or voided, in whole microseconds (see <see cref="Timestamps"/>);
+    /// <see langword="null"/> while it is approved or when declined.
     /// </summary>
     public DateTimeOffset? CompletedAt { get; private set; }
 
@@ -234,7 +236,7 @@ public sealed class CardAuthorization
     private void Complete(AuthorizationStatus status, DateTimeOffset completedAt)
     {
         Status = status;
-        CompletedAt = completedAt;
+        CompletedAt = completedAt.TruncateToMicroseconds();
     }
 
     private static void EnsureValid(Guid id, Card card, Guid merchantAccountId, Money amount)

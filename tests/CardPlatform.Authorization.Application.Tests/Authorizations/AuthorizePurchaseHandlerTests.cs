@@ -39,6 +39,17 @@ public class AuthorizePurchaseHandlerTests
     }
 
     [Fact]
+    public async Task Created_at_is_recorded_and_returned_in_whole_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds, so the response must match a later read.
+        Result<AuthorizationDto> result = await CreateHandler(new FixedTimeProvider(Now.AddTicks(7)))
+            .HandleAsync(Purchase(30m, "BRL"));
+
+        Assert.Equal(Now, Assert.Single(_authorizations.Added).CreatedAt);
+        Assert.Equal(Now, result.Value.CreatedAt);
+    }
+
+    [Fact]
     public async Task Given_authorization_id_is_used_for_the_authorization_and_the_hold()
     {
         Guid reservedId = Guid.CreateVersion7();
@@ -192,14 +203,14 @@ public class AuthorizePurchaseHandlerTests
         Assert.Equal(0, _unitOfWork.SaveCount);
     }
 
-    private AuthorizePurchaseHandler CreateHandler()
+    private AuthorizePurchaseHandler CreateHandler(TimeProvider? timeProvider = null)
     {
         return new AuthorizePurchaseHandler(
             _ledger,
             new FakeCardRepository(_card),
             _authorizations,
             _unitOfWork,
-            new FixedTimeProvider(Now));
+            timeProvider ?? new FixedTimeProvider(Now));
     }
 }
 

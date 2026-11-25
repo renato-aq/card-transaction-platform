@@ -61,7 +61,9 @@ public sealed class IdempotentAuthorizePurchaseHandler(
         }
 
         string requestHash = PurchaseRequestHash.Compute(command.Purchase);
-        DateTimeOffset now = timeProvider.GetUtcNow();
+        // Truncated like every instant the Authorization records (see Timestamps), so the claim and lease written to
+        // idempotency_keys are exactly the values PostgreSQL keeps.
+        DateTimeOffset now = timeProvider.GetUtcNow().TruncateToMicroseconds();
         IdempotencyClaim claim = new(
             command.IdempotencyKey,
             requestHash,
@@ -100,7 +102,7 @@ public sealed class IdempotentAuthorizePurchaseHandler(
             }
 
             response = responses.Create(result.Value);
-            keys.Complete(claim.Key, claim.ClaimToken, response, timeProvider.GetUtcNow());
+            keys.Complete(claim.Key, claim.ClaimToken, response, timeProvider.GetUtcNow().TruncateToMicroseconds());
             await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (IdempotencyClaimLostException)

@@ -45,6 +45,17 @@ public class CaptureAuthorizationHandlerTests
     }
 
     [Fact]
+    public async Task Completed_at_is_recorded_and_returned_in_whole_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds, so the response must match a later read.
+        Result<AuthorizationDto> result = await CreateHandler(new FixedTimeProvider(Now.AddTicks(7)))
+            .HandleAsync(new CaptureAuthorization(_authorization.Id));
+
+        Assert.Equal(Now, _authorization.CompletedAt);
+        Assert.Equal(Now, result.Value.CompletedAt);
+    }
+
+    [Fact]
     public async Task Unknown_authorization_fails_with_not_found_without_calling_the_ledger()
     {
         Result<AuthorizationDto> result = await CreateHandler().HandleAsync(new CaptureAuthorization(Guid.NewGuid()));
@@ -185,8 +196,9 @@ public class CaptureAuthorizationHandlerTests
         Assert.Equal(type, result.Error.Type);
     }
 
-    private CaptureAuthorizationHandler CreateHandler()
+    private CaptureAuthorizationHandler CreateHandler(TimeProvider? timeProvider = null)
     {
-        return new CaptureAuthorizationHandler(_ledger, _authorizations, _unitOfWork, new FixedTimeProvider(Now));
+        return new CaptureAuthorizationHandler(
+            _ledger, _authorizations, _unitOfWork, timeProvider ?? new FixedTimeProvider(Now));
     }
 }

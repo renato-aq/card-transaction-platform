@@ -25,6 +25,15 @@ public class CardTests
     }
 
     [Fact]
+    public void Create_truncates_the_creation_time_to_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds.
+        Card card = Card.Create(Guid.NewGuid(), Brl, CreatedAt.AddTicks(7));
+
+        Assert.Equal(CreatedAt, card.CreatedAt);
+    }
+
+    [Fact]
     public void Create_with_empty_ledger_account_id_throws()
     {
         Assert.Throws<ArgumentException>(() => Card.Create(Guid.Empty, Brl, CreatedAt));

@@ -16,6 +16,10 @@ internal sealed class FakeIdempotencyKeyStore : IIdempotencyKeyStore
 
     public List<(string Key, StoredResponse Response)> Completed { get; } = [];
 
+    public List<IdempotencyClaim> Claims { get; } = [];
+
+    public List<DateTimeOffset> CompletedAt { get; } = [];
+
     public List<string> Released { get; } = [];
 
     public List<string> Forgotten { get; } = [];
@@ -25,6 +29,7 @@ internal sealed class FakeIdempotencyKeyStore : IIdempotencyKeyStore
     public Task<IdempotencyKeyEntry?> TryClaimAsync(IdempotencyClaim claim, CancellationToken cancellationToken = default)
     {
         ClaimAttempts++;
+        Claims.Add(claim);
         if (!Keys.TryGetValue(claim.Key, out StoredKey? key))
         {
             key = new StoredKey(claim.RequestHash, claim.AuthorizationId);
@@ -50,6 +55,7 @@ internal sealed class FakeIdempotencyKeyStore : IIdempotencyKeyStore
     public void Complete(string key, Guid claimToken, StoredResponse response, DateTimeOffset completedAt)
     {
         Completed.Add((key, response));
+        CompletedAt.Add(completedAt);
         StoredKey stored = Keys[key];
         stored.Response = response;
         stored.ClaimToken = null;

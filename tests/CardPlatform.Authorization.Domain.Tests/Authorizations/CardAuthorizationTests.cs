@@ -74,6 +74,20 @@ public class CardAuthorizationTests
     }
 
     [Fact]
+    public void Approve_and_decline_truncate_the_creation_time_to_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds.
+        DateTimeOffset clock = Now.AddTicks(7);
+
+        CardAuthorization approved = CardAuthorization.Approve(Guid.NewGuid(), ActiveCard(), _merchantAccountId, TenBrl, clock);
+        CardAuthorization declined = CardAuthorization.Decline(
+            Guid.NewGuid(), ActiveCard(), _merchantAccountId, TenBrl, DeclineReason.InsufficientFunds, clock);
+
+        Assert.Equal(Now, approved.CreatedAt);
+        Assert.Equal(Now, declined.CreatedAt);
+    }
+
+    [Fact]
     public void Approve_a_blocked_card_throws()
     {
         Card card = ActiveCard();
@@ -155,6 +169,18 @@ public class CardAuthorizationTests
         Assert.True(result.IsSuccess);
         Assert.Equal(AuthorizationStatus.Voided, authorization.Status);
         Assert.Equal(Now.AddHours(1), authorization.CompletedAt);
+    }
+
+    [Fact]
+    public void Capture_and_void_truncate_the_completion_time_to_microseconds()
+    {
+        CardAuthorization captured = Approved();
+        CardAuthorization voided = Approved();
+
+        Assert.True(captured.Capture(Now.AddHours(1).AddTicks(3)).IsSuccess);
+        Assert.True(voided.Void(Now.AddHours(1).AddTicks(9)).IsSuccess);
+        Assert.Equal(Now.AddHours(1), captured.CompletedAt);
+        Assert.Equal(Now.AddHours(1), voided.CompletedAt);
     }
 
     [Theory]
