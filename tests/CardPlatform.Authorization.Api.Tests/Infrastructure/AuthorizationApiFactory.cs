@@ -76,13 +76,15 @@ public sealed class AuthorizationApiFactory : WebApplicationFactory<Program>, IA
 
     /// <summary>
     /// A copy of this API, sharing the same database, whose Ledger client reaches the Ledger but never gets the reply to
-    /// placing a hold: the hold is placed, yet the client sees a dropped connection on every attempt.
+    /// the requests matching <paramref name="losesReply"/> (by default, placing a hold): the request takes effect in the
+    /// Ledger, yet the client sees a dropped connection on every attempt.
     /// </summary>
-    public WebApplicationFactory<Program> WithLedgerReplyLost()
+    public WebApplicationFactory<Program> WithLedgerReplyLost(Func<HttpRequestMessage, bool>? losesReply = null)
     {
         return WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
             services.AddHttpClient(DependencyInjection.LedgerHttpClientName)
-                .ConfigurePrimaryHttpMessageHandler(() => new LostReplyLedgerHandler(Ledger.Server.CreateHandler()))));
+                .ConfigurePrimaryHttpMessageHandler(() =>
+                    new LostReplyLedgerHandler(Ledger.Server.CreateHandler(), losesReply))));
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

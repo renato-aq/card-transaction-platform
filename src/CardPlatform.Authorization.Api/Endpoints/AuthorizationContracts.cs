@@ -12,7 +12,8 @@ public sealed record AuthorizePurchaseRequest(Guid? CardId, Guid? MerchantAccoun
 /// <summary>
 /// An authorization; <see cref="Status"/> is serialized in camelCase (<c>approved</c>, <c>declined</c>, ...) and
 /// <see cref="DeclineReason"/> is a <c>snake_case</c> code (<c>card_blocked</c>, <c>currency_mismatch</c>,
-/// <c>insufficient_funds</c>), <see langword="null"/> unless the purchase was declined.
+/// <c>insufficient_funds</c>), <see langword="null"/> unless the purchase was declined. <see cref="CompletedAt"/> is when
+/// the authorization was captured or voided, <see langword="null"/> before that.
 /// </summary>
 public sealed record AuthorizationResponse(
     Guid Id,
@@ -22,7 +23,8 @@ public sealed record AuthorizationResponse(
     Guid MerchantAccountId,
     decimal Amount,
     string Currency,
-    DateTimeOffset CreatedAt)
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? CompletedAt)
 {
     internal static AuthorizationResponse From(AuthorizationDto authorization)
     {
@@ -34,6 +36,7 @@ public sealed record AuthorizationResponse(
             authorization.MerchantAccountId,
             authorization.Amount,
             authorization.Currency,
-            authorization.CreatedAt);
+            authorization.CreatedAt,
+            authorization.CompletedAt);
     }
 }

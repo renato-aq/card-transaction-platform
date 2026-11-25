@@ -32,6 +32,26 @@ internal static class AuthorizationEndpoints
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
+        authorizations.MapPost("/{id:guid}/capture", CaptureAuthorizationAsync)
+            .WithName("CaptureAuthorization")
+            .WithSummary(
+                "Captures an approved authorization: its hold goes to the merchant account in the Ledger and the "
+                + "authorization becomes captured.")
+            .Produces<AuthorizationResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
+        authorizations.MapPost("/{id:guid}/void", VoidAuthorizationAsync)
+            .WithName("VoidAuthorization")
+            .WithSummary(
+                "Voids an approved authorization: its hold goes back to the card in the Ledger and the authorization "
+                + "becomes voided.")
+            .Produces<AuthorizationResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
+
         authorizations.MapGet("/{id:guid}", GetAuthorizationAsync)
             .WithName("GetAuthorization")
             .WithSummary("Returns an authorization.")
@@ -70,6 +90,30 @@ internal static class AuthorizationEndpoints
         }
 
         return TypedResults.Text(response.Body, "application/json", Encoding.UTF8, response.StatusCode);
+    }
+
+    private static async Task<Results<Ok<AuthorizationResponse>, ProblemHttpResult>> CaptureAuthorizationAsync(
+        Guid id,
+        ICommandHandler<CaptureAuthorization, AuthorizationDto> handler,
+        CancellationToken cancellationToken)
+    {
+        Result<AuthorizationDto> result = await handler
+            .HandleAsync(new CaptureAuthorization(id), cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsFailure ? result.Error.ToProblem() : TypedResults.Ok(AuthorizationResponse.From(result.Value));
+    }
+
+    private static async Task<Results<Ok<AuthorizationResponse>, ProblemHttpResult>> VoidAuthorizationAsync(
+        Guid id,
+        ICommandHandler<VoidAuthorization, AuthorizationDto> handler,
+        CancellationToken cancellationToken)
+    {
+        Result<AuthorizationDto> result = await handler
+            .HandleAsync(new VoidAuthorization(id), cancellationToken)
+            .ConfigureAwait(false);
+
+        return result.IsFailure ? result.Error.ToProblem() : TypedResults.Ok(AuthorizationResponse.From(result.Value));
     }
 
     private static async Task<Results<Ok<AuthorizationResponse>, ProblemHttpResult>> GetAuthorizationAsync(

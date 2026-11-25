@@ -1,18 +1,22 @@
 namespace CardPlatform.Authorization.Api.Tests.Infrastructure;
 
 /// <summary>
-/// Primary handler of a Ledger whose replies to <c>POST /holds</c> are lost: the request reaches the Ledger (so the
-/// hold is placed), but the connection drops before the reply arrives. Other requests pass through.
+/// Primary handler of a Ledger whose replies to some requests are lost: the request reaches the Ledger (so it takes
+/// effect, e.g. the hold is placed or captured), but the connection drops before the reply arrives. The lost requests
+/// are those matching <paramref name="losesReply"/> (by default <c>POST /holds</c>); other requests pass through.
 /// </summary>
-internal sealed class LostReplyLedgerHandler(HttpMessageHandler ledger) : DelegatingHandler(ledger)
+internal sealed class LostReplyLedgerHandler(HttpMessageHandler ledger, Func<HttpRequestMessage, bool>? losesReply = null)
+    : DelegatingHandler(ledger)
 {
+    private readonly Func<HttpRequestMessage, bool> _losesReply = losesReply ?? IsPlaceHold;
+
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
         HttpResponseMessage response = await base.SendAsync(request, cancellationToken);
 
-        if (request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath == "/holds")
+        if (_losesReply(request))
         {
             response.Dispose();
             throw new HttpRequestException(
@@ -21,5 +25,10 @@ internal sealed class LostReplyLedgerHandler(HttpMessageHandler ledger) : Delega
         }
 
         return response;
+    }
+
+    private static bool IsPlaceHold(HttpRequestMessage request)
+    {
+        return request.Method == HttpMethod.Post && request.RequestUri?.AbsolutePath == "/holds";
     }
 }
