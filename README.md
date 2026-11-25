@@ -16,7 +16,8 @@ flowchart LR
     auth -->|"2. place hold<br/>4. capture or void hold"| ledger[Ledger API]
     ledger --> ledgerdb[(ledgerdb)]
     auth -->|"decisions (outbox)"| kafka{{Kafka}}
-    kafka -.-> fraud[Fraud Worker]
+    kafka -->|"decisions (once per event)"| fraud[Fraud Worker]
+    fraud --> frauddb[(frauddb)]
     ledgerdb -.-> settlement[Settlement Job]
     settlement -.-> file[/Daily settlement file/]
 ```
@@ -29,12 +30,12 @@ the merchant) or **voided** (the money goes back to the card) later; see [Author
 |---|---|
 | **Authorization API** | Approves or declines card purchases with low latency, idempotent by `Idempotency-Key`; captures and voids them |
 | **Ledger API** | Double-entry bookkeeping, balances and authorization holds; transactional outbox for events (planned) |
-| **Fraud Worker** | Consumes transaction events and flags suspicious patterns |
+| **Fraud Worker** | Consumes the authorization events idempotently into a purchase history per card; flags suspicious patterns (planned) |
 | **Settlement Job** | Generates the daily settlement file in batches from the ledger |
 
 Shared projects: `ServiceDefaults` (OpenTelemetry, health checks, resilience, service discovery), `Contracts`
-(integration events) and `Messaging` (transactional outbox and its Kafka publisher, used by the services' Infrastructure
-layers).
+(integration events) and `Messaging` (transactional outbox and its Kafka publisher, and the idempotent Kafka consumer,
+used by the services' Infrastructure layers).
 
 ## Tech stack
 
@@ -68,7 +69,7 @@ The Aspire dashboard URL is printed in the console. Kafka UI is available from t
 
 Run the tests (the Ledger and Authorization API integration tests use [Testcontainers](https://testcontainers.com/) to start a
 real PostgreSQL, so the container runtime must be running; the Authorization integration tests also run the real Ledger
-API in process, with its own database, and the outbox publisher tests also start a Kafka broker):
+API in process, with its own database, and the outbox publisher, consumer and Fraud Worker tests also start a Kafka broker):
 
 ```bash
 dotnet test
@@ -263,6 +264,16 @@ sequenceDiagram
   in order per card, when it is back. Delivery is at least once, so consumers deduplicate by event id. In Development
   the topics are created on startup (3 partitions each); `Messaging:Outbox:Enabled=false` turns publishing off.
 
+## Fraud Worker
+
+The Fraud Worker consumes the topic `authorizations` (consumer group `fraud-worker`) and records every decision in a
+purchase history per card in its own database (`frauddb`), the input of the fraud rules still to come. Each event is
+processed **once per event id**: the event id is written to `processed_messages` in the same transaction as the
+history, so a redelivered or duplicated event is skipped, and the Kafka offset is committed only after that
+transaction ([ADR 0011](docs/adr/0011-consume-integration-events-idempotently.md)). Event types it does not know are
+logged and ignored. It uses the same layering as the other services
+([ADR 0004](docs/adr/0004-use-hexagonal-architecture-with-pragmatic-cqrs.md)), with `Fraud.Worker` as the host.
+
 ### When the Ledger is down
 
 The Authorization talks to the Ledger through the `ILedgerClient` port, implemented by a typed `HttpClient` whose base
@@ -429,7 +440,7 @@ src/
   CardPlatform.AppHost/               Aspire orchestration
   CardPlatform.ServiceDefaults/       Shared observability, health checks, resilience
   CardPlatform.Contracts/             Integration events
-  CardPlatform.Messaging/             Transactional outbox (outbox_messages) and its Kafka publisher, shared by the services
+  CardPlatform.Messaging/             Transactional outbox (outbox_messages), its Kafka publisher and the idempotent consumer (processed_messages)
   CardPlatform.Authorization.Domain/         Authorization entities and invariants
   CardPlatform.Authorization.Application/    Authorization use cases and ports
   CardPlatform.Authorization.Infrastructure/ EF Core, PostgreSQL (authorizationdb), migrations, outbox, Ledger HTTP client
@@ -440,7 +451,7 @@ src/
   CardPlatform.Ledger.Api/            Ledger HTTP endpoints
   CardPlatform.Fraud.Domain/         Fraud entities and invariants
   CardPlatform.Fraud.Application/    Fraud use cases and ports
-  CardPlatform.Fraud.Infrastructure/ EF Core, PostgreSQL (frauddb), migrations
+  CardPlatform.Fraud.Infrastructure/ EF Core, PostgreSQL (frauddb), migrations, authorization event handlers
   CardPlatform.Fraud.Worker/         Fraud Worker host (composition root)
   CardPlatform.Settlement.Job/
 tests/
@@ -454,8 +465,8 @@ tests/
   CardPlatform.Authorization.Api.Tests/ Integration tests (WebApplicationFactory + Testcontainers PostgreSQL, Ledger API in process)
   CardPlatform.Fraud.Domain.Tests/
   CardPlatform.Fraud.Application.Tests/
-  CardPlatform.Fraud.Worker.Tests/    Worker host against Testcontainers PostgreSQL (migrations)
-  CardPlatform.Messaging.Tests/       Outbox publisher against Testcontainers PostgreSQL and Kafka
+  CardPlatform.Fraud.Worker.Tests/    Worker host against Testcontainers PostgreSQL and Kafka (migrations, idempotent consumption)
+  CardPlatform.Messaging.Tests/       Outbox publisher and consumer against Testcontainers PostgreSQL and Kafka
 docs/adr/                             Architecture Decision Records
 ```
 
@@ -485,3 +496,4 @@ See [docs/adr](docs/adr) for the reasoning behind the main technical choices:
 8. [Make purchase authorization idempotent](docs/adr/0008-make-purchase-authorization-idempotent.md)
 9. [Fail fast when the Ledger is unavailable](docs/adr/0009-fail-fast-when-the-ledger-is-unavailable.md)
 10. [Publish integration events through a transactional outbox](docs/adr/0010-publish-integration-events-through-a-transactional-outbox.md)
+11. [Consume integration events idempotently](docs/adr/0011-consume-integration-events-idempotently.md)
