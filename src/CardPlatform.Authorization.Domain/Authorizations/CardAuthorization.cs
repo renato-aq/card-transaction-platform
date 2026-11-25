@@ -1,4 +1,5 @@
 using CardPlatform.Authorization.Domain.Cards;
+using CardPlatform.Authorization.Domain.Common;
 using CardPlatform.Authorization.Domain.Monetary;
 
 namespace CardPlatform.Authorization.Domain.Authorizations;
@@ -7,7 +8,8 @@ namespace CardPlatform.Authorization.Domain.Authorizations;
 /// The decision on a card purchase: <see cref="AuthorizationStatus.Approved"/>, with the amount held in the Ledger
 /// under a hold whose id is this authorization's <see cref="Id"/> (ADR 0007), or
 /// <see cref="AuthorizationStatus.Declined"/> with a <see cref="DeclineReason"/>. Declines are business outcomes, so
-/// they are recorded too.
+/// they are recorded too. An approved authorization is completed once, by <see cref="Capture"/> (the money goes to the
+/// merchant) or <see cref="Void"/> (it goes back to the card); both states are final, like the hold's in the Ledger.
 /// </summary>
 /// <remarks>
 /// Named <c>CardAuthorization</c> rather than <c>Authorization</c>, which would clash with the
@@ -15,6 +17,10 @@ namespace CardPlatform.Authorization.Domain.Authorizations;
 /// </remarks>
 public sealed class CardAuthorization
 {
+    public const string NotCapturableCode = "authorization_not_capturable";
+
+    public const string NotVoidableCode = "authorization_not_voidable";
+
     private CardAuthorization(
         Guid id,
         Guid cardId,
@@ -61,12 +67,17 @@ public sealed class CardAuthorization
 
     public Money Amount { get; }
 
-    public AuthorizationStatus Status { get; }
+    public AuthorizationStatus Status { get; private set; }
 
     /// <summary>Why the purchase was declined; <see langword="null"/> unless it is declined.</summary>
     public DeclineReason? DeclineReason { get; }
 
     public DateTimeOffset CreatedAt { get; }
+
+    /// <summary>
+    /// When the authorization was captured or voided; <see langword="null"/> while it is approved or when declined.
+    /// </summary>
+    public DateTimeOffset? CompletedAt { get; private set; }
 
     /// <summary>
     /// A new authorization id: a time-ordered UUID v7 derived from <paramref name="createdAt"/>. It is chosen before
@@ -157,6 +168,73 @@ public sealed class CardAuthorization
             AuthorizationStatus.Declined,
             reason,
             createdAt);
+    }
+
+    /// <summary>
+    /// Marks the authorization <see cref="AuthorizationStatus.Captured"/> at <paramref name="completedAt"/>, once its
+    /// hold was captured in the Ledger. Only an <see cref="AuthorizationStatus.Approved"/> authorization can be
+    /// captured; any other (declined, captured or voided) fails with <see cref="NotCapturableCode"/> and is unchanged.
+    /// </summary>
+    public Result Capture(DateTimeOffset completedAt)
+    {
+        Result capturable = EnsureCapturable();
+        if (capturable.IsFailure)
+        {
+            return capturable;
+        }
+
+        Complete(AuthorizationStatus.Captured, completedAt);
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Marks the authorization <see cref="AuthorizationStatus.Voided"/> at <paramref name="completedAt"/>, once its hold
+    /// was voided in the Ledger. Only an <see cref="AuthorizationStatus.Approved"/> authorization can be voided; any
+    /// other (declined, captured or voided) fails with <see cref="NotVoidableCode"/> and is unchanged.
+    /// </summary>
+    public Result Void(DateTimeOffset completedAt)
+    {
+        Result voidable = EnsureVoidable();
+        if (voidable.IsFailure)
+        {
+            return voidable;
+        }
+
+        Complete(AuthorizationStatus.Voided, completedAt);
+        return Result.Success();
+    }
+
+    /// <summary>
+    /// Whether <see cref="Capture"/> would succeed, without changing anything: fails with
+    /// <see cref="NotCapturableCode"/> unless the authorization is <see cref="AuthorizationStatus.Approved"/>. Checked
+    /// before the Ledger is called.
+    /// </summary>
+    public Result EnsureCapturable()
+    {
+        return Status == AuthorizationStatus.Approved
+            ? Result.Success()
+            : Result.Failure(Error.BusinessRule(
+                NotCapturableCode,
+                $"Authorization {Id} cannot be captured: it is {Status}, and only approved authorizations can be captured."));
+    }
+
+    /// <summary>
+    /// Whether <see cref="Void"/> would succeed, without changing anything: fails with <see cref="NotVoidableCode"/>
+    /// unless the authorization is <see cref="AuthorizationStatus.Approved"/>. Checked before the Ledger is called.
+    /// </summary>
+    public Result EnsureVoidable()
+    {
+        return Status == AuthorizationStatus.Approved
+            ? Result.Success()
+            : Result.Failure(Error.BusinessRule(
+                NotVoidableCode,
+                $"Authorization {Id} cannot be voided: it is {Status}, and only approved authorizations can be voided."));
+    }
+
+    private void Complete(AuthorizationStatus status, DateTimeOffset completedAt)
+    {
+        Status = status;
+        CompletedAt = completedAt;
     }
 
     private static void EnsureValid(Guid id, Card card, Guid merchantAccountId, Money amount)

@@ -4,7 +4,8 @@ namespace CardPlatform.Authorization.Application.Authorizations;
 
 /// <summary>
 /// An authorization; <see cref="DeclineReason"/> is the <c>snake_case</c> code of the reason (see
-/// <see cref="DeclineReasons"/>), <see langword="null"/> unless the purchase was declined.
+/// <see cref="DeclineReasons"/>), <see langword="null"/> unless the purchase was declined; <see cref="CompletedAt"/> is
+/// when it was captured or voided, <see langword="null"/> before that.
 /// </summary>
 public sealed record AuthorizationDto(
     Guid Id,
@@ -14,7 +15,8 @@ public sealed record AuthorizationDto(
     Guid MerchantAccountId,
     decimal Amount,
     string Currency,
-    DateTimeOffset CreatedAt)
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? CompletedAt = null)
 {
     internal static AuthorizationDto From(CardAuthorization authorization)
     {
@@ -26,6 +28,7 @@ public sealed record AuthorizationDto(
             authorization.MerchantAccountId,
             authorization.Amount.Amount,
             authorization.Amount.Currency.Code,
-            authorization.CreatedAt);
+            authorization.CreatedAt,
+            authorization.CompletedAt);
     }
 }

@@ -28,6 +28,8 @@ public static class DependencyInjection
 
         services.AddScoped<ICommandHandler<CreateCard, CardDto>, CreateCardHandler>();
         services.AddScoped<ICommandHandler<BlockCard, CardDto>, BlockCardHandler>();
+        services.AddScoped<ICommandHandler<CaptureAuthorization, AuthorizationDto>, CaptureAuthorizationHandler>();
+        services.AddScoped<ICommandHandler<VoidAuthorization, AuthorizationDto>, VoidAuthorizationHandler>();
         services.AddScoped<ICommandHandler<IdempotentAuthorizePurchase, StoredResponse>>(static provider =>
             new IdempotentAuthorizePurchaseHandler(
                 new AuthorizePurchaseHandler(

@@ -1,5 +1,6 @@
 using CardPlatform.Authorization.Domain.Authorizations;
 using CardPlatform.Authorization.Domain.Cards;
+using CardPlatform.Authorization.Domain.Common;
 using CardPlatform.Authorization.Domain.Monetary;
 
 namespace CardPlatform.Authorization.Domain.Tests.Authorizations;
@@ -124,6 +125,110 @@ public class CardAuthorizationTests
 
         Assert.Throws<ArgumentOutOfRangeException>(() =>
             CardAuthorization.Decline(Guid.NewGuid(), ActiveCard(), _merchantAccountId, money, DeclineReason.CardBlocked, Now));
+    }
+
+    [Fact]
+    public void New_authorization_has_no_completion_date()
+    {
+        Assert.Null(Approved().CompletedAt);
+    }
+
+    [Fact]
+    public void Capture_marks_an_approved_authorization_captured_at_the_given_time()
+    {
+        CardAuthorization authorization = Approved();
+
+        Result result = authorization.Capture(Now.AddHours(1));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(AuthorizationStatus.Captured, authorization.Status);
+        Assert.Equal(Now.AddHours(1), authorization.CompletedAt);
+    }
+
+    [Fact]
+    public void Void_marks_an_approved_authorization_voided_at_the_given_time()
+    {
+        CardAuthorization authorization = Approved();
+
+        Result result = authorization.Void(Now.AddHours(1));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(AuthorizationStatus.Voided, authorization.Status);
+        Assert.Equal(Now.AddHours(1), authorization.CompletedAt);
+    }
+
+    [Theory]
+    [InlineData(AuthorizationStatus.Declined)]
+    [InlineData(AuthorizationStatus.Captured)]
+    [InlineData(AuthorizationStatus.Voided)]
+    public void Capture_fails_with_not_capturable_unless_approved_and_changes_nothing(AuthorizationStatus status)
+    {
+        CardAuthorization authorization = InStatus(status);
+        DateTimeOffset? completedAt = authorization.CompletedAt;
+
+        Result check = authorization.EnsureCapturable();
+        Result result = authorization.Capture(Now.AddDays(1));
+
+        AssertBusinessRule(CardAuthorization.NotCapturableCode, check);
+        AssertBusinessRule(CardAuthorization.NotCapturableCode, result);
+        Assert.Equal(status, authorization.Status);
+        Assert.Equal(completedAt, authorization.CompletedAt);
+    }
+
+    [Theory]
+    [InlineData(AuthorizationStatus.Declined)]
+    [InlineData(AuthorizationStatus.Captured)]
+    [InlineData(AuthorizationStatus.Voided)]
+    public void Void_fails_with_not_voidable_unless_approved_and_changes_nothing(AuthorizationStatus status)
+    {
+        CardAuthorization authorization = InStatus(status);
+        DateTimeOffset? completedAt = authorization.CompletedAt;
+
+        Result check = authorization.EnsureVoidable();
+        Result result = authorization.Void(Now.AddDays(1));
+
+        AssertBusinessRule(CardAuthorization.NotVoidableCode, check);
+        AssertBusinessRule(CardAuthorization.NotVoidableCode, result);
+        Assert.Equal(status, authorization.Status);
+        Assert.Equal(completedAt, authorization.CompletedAt);
+    }
+
+    [Fact]
+    public void An_approved_authorization_is_capturable_and_voidable()
+    {
+        CardAuthorization authorization = Approved();
+
+        Assert.True(authorization.EnsureCapturable().IsSuccess);
+        Assert.True(authorization.EnsureVoidable().IsSuccess);
+        Assert.Equal(AuthorizationStatus.Approved, authorization.Status);
+    }
+
+    private CardAuthorization Approved()
+    {
+        return CardAuthorization.Approve(Guid.NewGuid(), ActiveCard(), _merchantAccountId, TenBrl, Now);
+    }
+
+    private CardAuthorization InStatus(AuthorizationStatus status)
+    {
+        if (status == AuthorizationStatus.Declined)
+        {
+            return CardAuthorization.Decline(
+                Guid.NewGuid(), ActiveCard(), _merchantAccountId, TenBrl, DeclineReason.InsufficientFunds, Now);
+        }
+
+        CardAuthorization authorization = Approved();
+        Result completed = status == AuthorizationStatus.Captured
+            ? authorization.Capture(Now.AddMinutes(5))
+            : authorization.Void(Now.AddMinutes(5));
+        Assert.True(completed.IsSuccess);
+        return authorization;
+    }
+
+    private static void AssertBusinessRule(string code, Result result)
+    {
+        Assert.True(result.IsFailure);
+        Assert.Equal(code, result.Error.Code);
+        Assert.Equal(ErrorType.BusinessRule, result.Error.Type);
     }
 
     private static Card ActiveCard()
