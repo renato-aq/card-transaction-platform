@@ -19,6 +19,9 @@ public abstract class HexagonalArchitectureTests(ServiceLayers layers)
     private static readonly IObjectProvider<IType> AspNetCore =
         Types(includeReferenced: true).That().ResideInNamespaceMatching(@"^Microsoft\.AspNetCore(\..+)?$").As("ASP.NET Core");
 
+    private static readonly IObjectProvider<IType> HttpClient =
+        Types(includeReferenced: true).That().ResideInNamespaceMatching(@"^System\.Net\.Http(\..+)?$").As("System.Net.Http");
+
     [Fact]
     public void Domain_does_not_depend_on_application()
     {
@@ -79,6 +82,14 @@ public abstract class HexagonalArchitectureTests(ServiceLayers layers)
     public void Application_does_not_depend_on_aspnet_core()
     {
         Types().That().Are(layers.ApplicationLayer).Should().NotDependOnAny(AspNetCore)
+            .Check(layers.Architecture);
+    }
+
+    [Fact]
+    public void Application_does_not_depend_on_http_client()
+    {
+        // Outbound HTTP (e.g. the Authorization's Ledger client) is an Infrastructure adapter behind a port.
+        Types().That().Are(layers.ApplicationLayer).Should().NotDependOnAny(HttpClient)
             .Check(layers.Architecture);
     }
 }
