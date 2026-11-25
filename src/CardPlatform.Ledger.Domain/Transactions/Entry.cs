@@ -16,6 +16,14 @@ public sealed record Entry
         Amount = amount;
     }
 
+    // Used only to rehydrate persisted entries: Amount is set right after construction.
+    private Entry(Guid accountId, EntryDirection direction)
+    {
+        AccountId = accountId;
+        Direction = direction;
+        Amount = null!;
+    }
+
     public Guid AccountId { get; }
 
     public EntryDirection Direction { get; }

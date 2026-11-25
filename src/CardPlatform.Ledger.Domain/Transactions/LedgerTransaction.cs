@@ -35,6 +35,12 @@ public sealed class LedgerTransaction
         _entries = entries;
     }
 
+    // Used only to rehydrate persisted transactions: the entries are loaded into the list afterwards.
+    private LedgerTransaction(Guid id, string? description, DateTimeOffset createdAt)
+        : this(id, description, createdAt, [])
+    {
+    }
+
     public Guid Id { get; }
 
     public string? Description { get; }
