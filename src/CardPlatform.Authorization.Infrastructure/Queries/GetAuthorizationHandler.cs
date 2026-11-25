@@ -33,6 +33,7 @@ internal sealed class GetAuthorizationHandler(AuthorizationDbContext dbContext)
                 authorization.Amount.Amount,
                 authorization.Amount.Currency,
                 authorization.CreatedAt,
+                authorization.CompletedAt,
             })
             .SingleOrDefaultAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -50,6 +51,7 @@ internal sealed class GetAuthorizationHandler(AuthorizationDbContext dbContext)
             row.MerchantAccountId,
             row.Amount,
             row.Currency.Code,
-            row.CreatedAt));
+            row.CreatedAt,
+            row.CompletedAt));
     }
 }

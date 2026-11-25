@@ -56,5 +56,11 @@ internal sealed class CardAuthorizationConfiguration : IEntityTypeConfiguration<
 
         builder.Property(authorization => authorization.CreatedAt)
             .HasConversion(AuthorizationConverters.Utc);
+
+        builder.Property(authorization => authorization.CompletedAt)
+            .HasConversion(AuthorizationConverters.Utc);
+
+        // No concurrency token: captures and voids are serialized by the Ledger's hold and every save writes the hold's
+        // final state, so concurrent writes converge (see AuthorizationReconciliation).
     }
 }
