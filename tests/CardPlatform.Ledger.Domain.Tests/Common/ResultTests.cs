@@ -4,7 +4,7 @@ namespace CardPlatform.Ledger.Domain.Tests.Common;
 
 public class ResultTests
 {
-    private static readonly Error SomeError = new("some_error", "Something went wrong.");
+    private static readonly Error SomeError = Error.BusinessRule("some_error", "Something went wrong.");
 
     [Fact]
     public void Success_result_has_no_error()

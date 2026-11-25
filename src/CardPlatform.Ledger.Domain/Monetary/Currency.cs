@@ -23,7 +23,7 @@ public sealed record Currency
     {
         if (!IsValidCode(code))
         {
-            return Result.Failure<Currency>(new Error(
+            return Result.Failure<Currency>(Error.Validation(
                 InvalidCurrencyCode,
                 $"Currency '{code}' is not a valid ISO 4217 code (three uppercase letters)."));
         }

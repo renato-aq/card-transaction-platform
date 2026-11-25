@@ -118,7 +118,7 @@ public sealed class LedgerTransaction
             Account account = accountsById[accountId];
             if (account.Currency != Currency)
             {
-                return Result.Failure(new Error(
+                return Result.Failure(Error.BusinessRule(
                     CurrencyMismatchCode,
                     $"Account {account.Id} is in {account.Currency.Code} but the transaction is in {Currency.Code}."));
             }
@@ -129,7 +129,7 @@ public sealed class LedgerTransaction
             Account account = accountsById[accountId];
             if (!account.AllowsBalance(account.Balance + netChange))
             {
-                return Result.Failure(new Error(
+                return Result.Failure(Error.BusinessRule(
                     InsufficientFundsCode,
                     $"Account {account.Id} has a balance of {account.Balance} and cannot be debited {Money.Zero(Currency) - netChange}."));
             }
@@ -147,7 +147,7 @@ public sealed class LedgerTransaction
     {
         if (entries.Count < MinimumEntries)
         {
-            return new Error(
+            return Error.Validation(
                 InsufficientEntriesCode,
                 $"A transaction needs at least {MinimumEntries} entries, but {entries.Count} were given.");
         }
@@ -155,7 +155,7 @@ public sealed class LedgerTransaction
         Entry? nonPositive = entries.Find(static entry => entry.Amount.Amount <= 0m);
         if (nonPositive is not null)
         {
-            return new Error(
+            return Error.Validation(
                 InvalidAmountCode,
                 $"Entry amounts must be greater than zero, but account {nonPositive.AccountId} has {nonPositive.Amount}.");
         }
@@ -163,14 +163,14 @@ public sealed class LedgerTransaction
         Currency currency = entries[0].Amount.Currency;
         if (entries.Exists(entry => entry.Amount.Currency != currency))
         {
-            return new Error(MixedCurrenciesCode, "All entries of a transaction must be in the same currency.");
+            return Error.BusinessRule(MixedCurrenciesCode, "All entries of a transaction must be in the same currency.");
         }
 
         Money debits = Sum(entries, EntryDirection.Debit, currency);
         Money credits = Sum(entries, EntryDirection.Credit, currency);
         if (debits != credits)
         {
-            return new Error(
+            return Error.BusinessRule(
                 UnbalancedTransactionCode,
                 $"Debits ({debits}) must equal credits ({credits}).");
         }

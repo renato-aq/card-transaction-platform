@@ -112,6 +112,7 @@ public class LedgerTransactionTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("insufficient_entries", result.Error.Code);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 
     [Fact]
@@ -121,6 +122,7 @@ public class LedgerTransactionTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("insufficient_entries", result.Error.Code);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 
     [Theory]
@@ -134,6 +136,7 @@ public class LedgerTransactionTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("invalid_amount", result.Error.Code);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 
     [Fact]
@@ -145,6 +148,7 @@ public class LedgerTransactionTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("mixed_currencies", result.Error.Code);
+        Assert.Equal(ErrorType.BusinessRule, result.Error.Type);
     }
 
     [Fact]
@@ -156,6 +160,7 @@ public class LedgerTransactionTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("unbalanced_transaction", result.Error.Code);
+        Assert.Equal(ErrorType.BusinessRule, result.Error.Type);
     }
 
     [Fact]
@@ -167,6 +172,7 @@ public class LedgerTransactionTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("unbalanced_transaction", result.Error.Code);
+        Assert.Equal(ErrorType.BusinessRule, result.Error.Type);
     }
 
     [Fact]
@@ -175,6 +181,7 @@ public class LedgerTransactionTests
         Result<LedgerTransaction> result = LedgerTransaction.Create([Entry.Debit(FirstAccountId, Reais(0m))], Now);
 
         Assert.Equal("insufficient_entries", result.Error.Code);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 
     [Fact]
@@ -185,6 +192,7 @@ public class LedgerTransactionTests
             Now);
 
         Assert.Equal("invalid_amount", result.Error.Code);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 
     [Fact]
@@ -195,6 +203,7 @@ public class LedgerTransactionTests
             Now);
 
         Assert.Equal("mixed_currencies", result.Error.Code);
+        Assert.Equal(ErrorType.BusinessRule, result.Error.Type);
     }
 
     [Fact]
@@ -290,6 +299,7 @@ public class LedgerTransactionTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("insufficient_funds", result.Error.Code);
+        Assert.Equal(ErrorType.BusinessRule, result.Error.Type);
         Assert.Equal(Reais(50m), card.Balance);
         Assert.Equal(Money.Zero(Brl), merchant.Balance);
     }
@@ -310,6 +320,7 @@ public class LedgerTransactionTests
         Result result = transaction.ApplyTo([fundedCard, emptyCard, merchant]);
 
         Assert.Equal("insufficient_funds", result.Error.Code);
+        Assert.Equal(ErrorType.BusinessRule, result.Error.Type);
         Assert.Equal(Reais(100m), fundedCard.Balance);
         Assert.Equal(Money.Zero(Brl), emptyCard.Balance);
         Assert.Equal(Money.Zero(Brl), merchant.Balance);
@@ -344,6 +355,7 @@ public class LedgerTransactionTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("currency_mismatch", result.Error.Code);
+        Assert.Equal(ErrorType.BusinessRule, result.Error.Type);
         Assert.Equal(Money.Zero(Brl), settlement.Balance);
         Assert.Equal(Money.Zero(Usd), dollarCard.Balance);
     }
@@ -360,6 +372,7 @@ public class LedgerTransactionTests
         Result result = transaction.ApplyTo([emptyCard, dollarMerchant]);
 
         Assert.Equal("currency_mismatch", result.Error.Code);
+        Assert.Equal(ErrorType.BusinessRule, result.Error.Type);
     }
 
     [Fact]

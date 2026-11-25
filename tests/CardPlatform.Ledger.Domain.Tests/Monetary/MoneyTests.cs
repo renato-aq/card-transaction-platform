@@ -54,6 +54,7 @@ public class MoneyTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("invalid_currency", result.Error.Code);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 
     [Theory]
@@ -66,6 +67,7 @@ public class MoneyTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("too_many_decimal_places", result.Error.Code);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 
     [Fact]

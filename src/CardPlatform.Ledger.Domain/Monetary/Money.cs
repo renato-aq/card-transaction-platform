@@ -47,7 +47,7 @@ public sealed record Money : IComparable<Money>
 
         if (decimal.Round(amount, MaxDecimalPlaces) != amount)
         {
-            return Result.Failure<Money>(new Error(
+            return Result.Failure<Money>(Error.Validation(
                 TooManyDecimalPlacesCode,
                 $"Amount {amount.ToString(CultureInfo.InvariantCulture)} has more than {MaxDecimalPlaces} decimal places."));
         }

@@ -34,6 +34,7 @@ public class CurrencyTests
 
         Assert.True(result.IsFailure);
         Assert.Equal("invalid_currency", result.Error.Code);
+        Assert.Equal(ErrorType.Validation, result.Error.Type);
     }
 
     [Fact]
