@@ -36,6 +36,7 @@ if (app.Environment.IsDevelopment())
 
 app.MapDefaultEndpoints();
 app.MapCardEndpoints();
+app.MapAuthorizationEndpoints();
 
 await app.RunAsync();
 
