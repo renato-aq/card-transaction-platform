@@ -44,6 +44,8 @@ public class OpenAccountHandlerTests
     [InlineData("0")]
     [InlineData("1")]
     [InlineData("Card,Merchant")]
+    [InlineData("holds")]
+    [InlineData("Holds")]
     public async Task Invalid_account_type_is_rejected_without_saving(string? type)
     {
         Result<AccountDto> result = await _handler.HandleAsync(new OpenAccount(type, "BRL"));
