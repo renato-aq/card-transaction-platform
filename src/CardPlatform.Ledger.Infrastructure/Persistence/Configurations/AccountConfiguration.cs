@@ -10,6 +10,9 @@ internal sealed class AccountConfiguration : IEntityTypeConfiguration<Account>
     /// <summary>Name of the shadow property mapped to the PostgreSQL <c>xmin</c> system column.</summary>
     public const string RowVersion = "xmin";
 
+    /// <summary>Unique partial index that allows a single <see cref="AccountType.Holds"/> account per currency.</summary>
+    public const string HoldsAccountPerCurrencyIndex = "ux_accounts_holds_currency";
+
     public void Configure(EntityTypeBuilder<Account> builder)
     {
         builder.ToTable("accounts");
@@ -42,6 +45,14 @@ internal sealed class AccountConfiguration : IEntityTypeConfiguration<Account>
                 .HasConversion(LedgerConverters.Currency)
                 .HasColumnType(LedgerConverters.CurrencyColumnType);
         });
+
+        // One holds account per currency (ADR 0007). The Application creates it on first use, so two first requests can
+        // both try to insert it: this index rejects the second one, which is retried and then finds the first.
+        // Account types are stored as their enum names.
+        builder.HasIndex(account => account.Currency)
+            .IsUnique()
+            .HasFilter($"type = '{nameof(AccountType.Holds)}'")
+            .HasDatabaseName(HoldsAccountPerCurrencyIndex);
 
         // Optimistic concurrency (ADR 0006): xmin is the PostgreSQL system column that changes on every update of
         // the row. Npgsql maps a uint row version to it, so updates check that nobody else changed the account

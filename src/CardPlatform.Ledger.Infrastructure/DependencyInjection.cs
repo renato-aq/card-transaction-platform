@@ -1,6 +1,7 @@
 using CardPlatform.Ledger.Application.Abstractions.Messaging;
 using CardPlatform.Ledger.Application.Abstractions.Persistence;
 using CardPlatform.Ledger.Application.Accounts;
+using CardPlatform.Ledger.Application.Holds;
 using CardPlatform.Ledger.Infrastructure.Persistence;
 using CardPlatform.Ledger.Infrastructure.Persistence.Repositories;
 using CardPlatform.Ledger.Infrastructure.Queries;
@@ -32,9 +33,11 @@ public static class DependencyInjection
 
         builder.Services.AddScoped<IAccountRepository, AccountRepository>();
         builder.Services.AddScoped<ILedgerTransactionRepository, LedgerTransactionRepository>();
+        builder.Services.AddScoped<IHoldRepository, HoldRepository>();
         builder.Services.AddScoped<IUnitOfWork>(static services => services.GetRequiredService<LedgerDbContext>());
 
         builder.Services.AddScoped<IQueryHandler<GetAccountBalance, AccountBalanceDto>, GetAccountBalanceHandler>();
+        builder.Services.AddScoped<IQueryHandler<GetHold, HoldDto>, GetHoldHandler>();
 
         return builder;
     }

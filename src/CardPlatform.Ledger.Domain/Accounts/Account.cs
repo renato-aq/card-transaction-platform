@@ -1,3 +1,4 @@
+using CardPlatform.Ledger.Domain.Common;
 using CardPlatform.Ledger.Domain.Monetary;
 
 namespace CardPlatform.Ledger.Domain.Accounts;
@@ -25,6 +26,7 @@ public sealed class Account
 
     public Money Balance { get; private set; }
 
+    /// <summary>When the account was opened, in whole microseconds (see <see cref="Timestamps"/>).</summary>
     public DateTimeOffset CreatedAt { get; }
 
     /// <summary>
@@ -41,7 +43,8 @@ public sealed class Account
 
         ArgumentNullException.ThrowIfNull(currency);
 
-        return new Account(Guid.CreateVersion7(createdAt), type, currency, createdAt);
+        DateTimeOffset recordedAt = createdAt.TruncateToMicroseconds();
+        return new Account(Guid.CreateVersion7(recordedAt), type, currency, recordedAt);
     }
 
     /// <summary>

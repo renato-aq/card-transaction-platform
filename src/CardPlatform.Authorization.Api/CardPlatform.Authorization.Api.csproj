@@ -11,8 +11,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CardPlatform.Authorization.Api.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\CardPlatform.ServiceDefaults\CardPlatform.ServiceDefaults.csproj" />
     <ProjectReference Include="..\CardPlatform.Contracts\CardPlatform.Contracts.csproj" />
+    <ProjectReference Include="..\CardPlatform.Authorization.Application\CardPlatform.Authorization.Application.csproj" />
+    <ProjectReference Include="..\CardPlatform.Authorization.Infrastructure\CardPlatform.Authorization.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>

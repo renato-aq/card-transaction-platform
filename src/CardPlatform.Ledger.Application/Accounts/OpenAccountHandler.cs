@@ -38,11 +38,16 @@ public sealed class OpenAccountHandler(
             new MoneyDto(account.Balance.Amount, account.Balance.Currency.Code)));
     }
 
-    // Matches the enum names only (case-insensitive). Enum.TryParse is not used because it also accepts
-    // numeric strings such as "1" or "42", which are not valid account types for clients.
+    // Account types clients may open. Holds accounts are system accounts (one per currency, see ADR 0007)
+    // created by the Application on first use, so they are deliberately not listed here.
+    private static readonly AccountType[] ClientOpenableAccountTypes =
+        [AccountType.Card, AccountType.Merchant, AccountType.Settlement];
+
+    // Matches the names of the client-openable types only (case-insensitive). Enum.TryParse is not used because
+    // it also accepts numeric strings such as "1" or "42" and every enum member, including system-only types.
     private static bool TryParseAccountType(string? value, out AccountType type)
     {
-        foreach (AccountType candidate in Enum.GetValues<AccountType>())
+        foreach (AccountType candidate in ClientOpenableAccountTypes)
         {
             if (string.Equals(candidate.ToString(), value, StringComparison.OrdinalIgnoreCase))
             {

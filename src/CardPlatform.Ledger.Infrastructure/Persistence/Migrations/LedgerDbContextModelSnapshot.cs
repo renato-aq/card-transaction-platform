@@ -69,7 +69,79 @@ namespace CardPlatform.Ledger.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_accounts");
 
+                    b.HasIndex("Currency")
+                        .IsUnique()
+                        .HasDatabaseName("ux_accounts_holds_currency")
+                        .HasFilter("type = 'Holds'");
+
                     b.ToTable("accounts", (string)null);
+                });
+
+            modelBuilder.Entity("CardPlatform.Ledger.Domain.Holds.Hold", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CardAccountId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("card_account_id");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<Guid?>("CompletionTransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("completion_transaction_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("PlacementTransactionId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("placement_transaction_id");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("status");
+
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.ComplexProperty(typeof(Dictionary<string, object>), "Amount", "CardPlatform.Ledger.Domain.Holds.Hold.Amount#Money", b1 =>
+                        {
+                            b1.IsRequired();
+
+                            b1.Property<decimal>("Amount")
+                                .HasColumnType("numeric(18,2)")
+                                .HasColumnName("amount");
+
+                            b1.Property<string>("Currency")
+                                .IsRequired()
+                                .HasColumnType("char(3)")
+                                .HasColumnName("currency");
+                        });
+
+                    b.HasKey("Id")
+                        .HasName("pk_holds");
+
+                    b.HasIndex("CardAccountId")
+                        .HasDatabaseName("ix_holds_card_account_id");
+
+                    b.HasIndex("CompletionTransactionId")
+                        .HasDatabaseName("ix_holds_completion_transaction_id");
+
+                    b.HasIndex("PlacementTransactionId")
+                        .HasDatabaseName("ix_holds_placement_transaction_id");
+
+                    b.ToTable("holds", (string)null);
                 });
 
             modelBuilder.Entity("CardPlatform.Ledger.Domain.Transactions.Entry", b =>
@@ -139,6 +211,29 @@ namespace CardPlatform.Ledger.Infrastructure.Persistence.Migrations
                         .HasName("pk_transactions");
 
                     b.ToTable("transactions", (string)null);
+                });
+
+            modelBuilder.Entity("CardPlatform.Ledger.Domain.Holds.Hold", b =>
+                {
+                    b.HasOne("CardPlatform.Ledger.Domain.Accounts.Account", null)
+                        .WithMany()
+                        .HasForeignKey("CardAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_holds_accounts_card_account_id");
+
+                    b.HasOne("CardPlatform.Ledger.Domain.Transactions.LedgerTransaction", null)
+                        .WithMany()
+                        .HasForeignKey("CompletionTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .HasConstraintName("fk_holds_transactions_completion_transaction_id");
+
+                    b.HasOne("CardPlatform.Ledger.Domain.Transactions.LedgerTransaction", null)
+                        .WithMany()
+                        .HasForeignKey("PlacementTransactionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired()
+                        .HasConstraintName("fk_holds_transactions_placement_transaction_id");
                 });
 
             modelBuilder.Entity("CardPlatform.Ledger.Domain.Transactions.Entry", b =>

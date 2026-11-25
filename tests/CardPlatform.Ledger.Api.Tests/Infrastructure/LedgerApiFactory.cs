@@ -2,6 +2,8 @@ using CardPlatform.Ledger.Infrastructure;
 
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.Extensions.DependencyInjection;
 
 using Testcontainers.PostgreSql;
 
@@ -27,6 +29,12 @@ public sealed class LedgerApiFactory : WebApplicationFactory<Program>, IAsyncLif
     {
         await DisposeAsync();
         await _postgres.DisposeAsync();
+    }
+
+    /// <summary>A copy of this API, sharing the same database, that reads the time from <paramref name="clock"/>.</summary>
+    public WebApplicationFactory<Program> WithClock(TimeProvider clock)
+    {
+        return WithWebHostBuilder(builder => builder.ConfigureTestServices(services => services.AddSingleton(clock)));
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)

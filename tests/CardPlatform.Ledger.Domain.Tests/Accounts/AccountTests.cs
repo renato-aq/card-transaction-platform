@@ -13,6 +13,7 @@ public class AccountTests
     [InlineData(AccountType.Card)]
     [InlineData(AccountType.Merchant)]
     [InlineData(AccountType.Settlement)]
+    [InlineData(AccountType.Holds)]
     public void Opened_account_has_type_currency_creation_date_and_zero_balance(AccountType type)
     {
         Account account = Account.Open(type, Brl, Now);
@@ -21,6 +22,15 @@ public class AccountTests
         Assert.Equal(Brl, account.Currency);
         Assert.Equal(Now, account.CreatedAt);
         Assert.Equal(Money.Zero(Brl), account.Balance);
+    }
+
+    [Fact]
+    public void Open_truncates_the_creation_time_to_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds.
+        Account account = Account.Open(AccountType.Card, Brl, Now.AddTicks(7));
+
+        Assert.Equal(Now, account.CreatedAt);
     }
 
     [Fact]

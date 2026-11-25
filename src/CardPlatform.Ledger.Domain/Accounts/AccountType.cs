@@ -13,4 +13,10 @@ public enum AccountType
 
     /// <summary>Platform account where money enters (top-ups) and leaves (settlements) the ledger.</summary>
     Settlement,
+
+    /// <summary>
+    /// Platform account, one per currency, holding the amounts reserved by pending authorization holds
+    /// (see <see cref="Domain.Holds.Hold"/>); it can have any balance.
+    /// </summary>
+    Holds,
 }

@@ -63,6 +63,18 @@ public class LedgerTransactionTests
         Assert.Equal(Brl, transaction.Currency);
     }
 
+    [Fact]
+    public void Create_truncates_the_creation_time_to_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds.
+        Result<LedgerTransaction> result = LedgerTransaction.Create(
+            [Entry.Debit(FirstAccountId, Reais(10m)), Entry.Credit(SecondAccountId, Reais(10m))],
+            Now.AddTicks(7));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Now, result.Value.CreatedAt);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

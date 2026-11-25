@@ -47,6 +47,7 @@ public class AccountEndpointsTests(LedgerApiFactory factory)
     [InlineData("savings", "BRL", "invalid_account_type")]
     [InlineData("1", "BRL", "invalid_account_type")]
     [InlineData(null, "BRL", "invalid_account_type")]
+    [InlineData("holds", "BRL", "invalid_account_type")]
     [InlineData("card", "brl", "invalid_currency")]
     [InlineData("card", "REAL", "invalid_currency")]
     [InlineData("card", null, "invalid_currency")]

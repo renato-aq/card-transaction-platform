@@ -2,6 +2,7 @@ using CardPlatform.Ledger.Application.Abstractions.Persistence;
 using CardPlatform.Ledger.Application.Accounts;
 using CardPlatform.Ledger.Domain.Accounts;
 using CardPlatform.Ledger.Domain.Common;
+using CardPlatform.Ledger.Domain.Monetary;
 
 namespace CardPlatform.Ledger.Application.Tests.Accounts;
 
@@ -37,6 +38,18 @@ public class OpenAccountHandlerTests
         Assert.Equal(Now, saved.CreatedAt);
     }
 
+    [Fact]
+    public async Task Created_at_is_recorded_in_whole_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds.
+        OpenAccountHandler handler = new(_accounts, _unitOfWork, new FixedTimeProvider(Now.AddTicks(7)));
+
+        Result<AccountDto> result = await handler.HandleAsync(new OpenAccount("card", "BRL"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Now, Assert.Single(_accounts.Added).CreatedAt);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -44,6 +57,8 @@ public class OpenAccountHandlerTests
     [InlineData("0")]
     [InlineData("1")]
     [InlineData("Card,Merchant")]
+    [InlineData("holds")]
+    [InlineData("Holds")]
     public async Task Invalid_account_type_is_rejected_without_saving(string? type)
     {
         Result<AccountDto> result = await _handler.HandleAsync(new OpenAccount(type, "BRL"));
@@ -84,6 +99,11 @@ public class OpenAccountHandlerTests
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult<IReadOnlyList<Account>>(Added.FindAll(account => ids.Contains(account.Id)));
+        }
+
+        public Task<Account?> GetHoldsAccountAsync(Currency currency, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Opening an account must not look up holds accounts.");
         }
 
         public void Add(Account account)
