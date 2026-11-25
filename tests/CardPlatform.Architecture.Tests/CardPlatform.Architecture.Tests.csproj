@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\CardPlatform.Authorization.Application\CardPlatform.Authorization.Application.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Authorization.Domain\CardPlatform.Authorization.Domain.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Authorization.Infrastructure\CardPlatform.Authorization.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CardPlatform.Contracts\CardPlatform.Contracts.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Ledger.Api\CardPlatform.Ledger.Api.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Ledger.Application\CardPlatform.Ledger.Application.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Ledger.Domain\CardPlatform.Ledger.Domain.csproj" />
