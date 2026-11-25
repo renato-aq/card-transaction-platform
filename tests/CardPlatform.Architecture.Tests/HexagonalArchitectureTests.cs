@@ -22,6 +22,14 @@ public abstract class HexagonalArchitectureTests(ServiceLayers layers)
     private static readonly IObjectProvider<IType> HttpClient =
         Types(includeReferenced: true).That().ResideInNamespaceMatching(@"^System\.Net\.Http(\..+)?$").As("System.Net.Http");
 
+    // The integration event contracts: mapped from the domain model by the Application, never used by the Domain.
+    private static readonly IObjectProvider<IType> IntegrationContracts =
+        Types(includeReferenced: true).That().ResideInNamespaceMatching(@"^CardPlatform\.Contracts(\..+)?$").As("CardPlatform.Contracts");
+
+    // The messaging plumbing (outbox persistence, Kafka): an outbound adapter, used only by Infrastructure.
+    private static readonly IObjectProvider<IType> Messaging =
+        Types(includeReferenced: true).That().ResideInNamespaceMatching(@"^CardPlatform\.Messaging(\..+)?$").As("CardPlatform.Messaging");
+
     [Fact]
     public void Domain_does_not_depend_on_application()
     {
@@ -54,6 +62,35 @@ public abstract class HexagonalArchitectureTests(ServiceLayers layers)
     public void Domain_does_not_depend_on_aspnet_core()
     {
         Types().That().Are(layers.DomainLayer).Should().NotDependOnAny(AspNetCore)
+            .Check(layers.Architecture);
+    }
+
+    [Fact]
+    public void Domain_does_not_depend_on_integration_contracts()
+    {
+        Types().That().Are(layers.DomainLayer).Should().NotDependOnAny(IntegrationContracts)
+            .Check(layers.Architecture);
+    }
+
+    [Fact]
+    public void Domain_does_not_depend_on_messaging()
+    {
+        Types().That().Are(layers.DomainLayer).Should().NotDependOnAny(Messaging)
+            .Check(layers.Architecture);
+    }
+
+    [Fact]
+    public void Application_does_not_depend_on_messaging()
+    {
+        // The Application writes events through its own port (e.g. IOutbox); the outbox table is an adapter detail.
+        Types().That().Are(layers.ApplicationLayer).Should().NotDependOnAny(Messaging)
+            .Check(layers.Architecture);
+    }
+
+    [Fact]
+    public void Api_does_not_depend_on_messaging()
+    {
+        Types().That().Are(layers.ApiLayer).Should().NotDependOnAny(Messaging)
             .Check(layers.Architecture);
     }
 

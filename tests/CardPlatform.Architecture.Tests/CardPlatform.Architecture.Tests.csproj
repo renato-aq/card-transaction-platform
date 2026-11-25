@@ -29,6 +29,7 @@
     <ProjectReference Include="..\..\src\CardPlatform.Ledger.Application\CardPlatform.Ledger.Application.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Ledger.Domain\CardPlatform.Ledger.Domain.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Ledger.Infrastructure\CardPlatform.Ledger.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CardPlatform.Messaging\CardPlatform.Messaging.csproj" />
   </ItemGroup>
 
 </Project>
