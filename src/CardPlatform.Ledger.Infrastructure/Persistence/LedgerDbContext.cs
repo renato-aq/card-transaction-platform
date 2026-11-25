@@ -17,7 +17,23 @@ public sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options) :
 
     async Task IUnitOfWork.SaveChangesAsync(CancellationToken cancellationToken)
     {
-        await SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            await SaveChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (DbUpdateConcurrencyException exception)
+        {
+            // An account's xmin changed since it was read (ADR 0006). EF Core rolled the transaction back; the
+            // Application layer only sees its own exception type.
+            throw new ConcurrencyConflictException(
+                "An account was changed by another request since it was read; nothing was saved.",
+                exception);
+        }
+    }
+
+    void IUnitOfWork.DiscardChanges()
+    {
+        ChangeTracker.Clear();
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

@@ -45,6 +45,12 @@ namespace CardPlatform.Ledger.Infrastructure.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("type");
 
+                    b.Property<uint>("xmin")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
                     b.ComplexProperty(typeof(Dictionary<string, object>), "Balance", "CardPlatform.Ledger.Domain.Accounts.Account.Balance#Money", b1 =>
                         {
                             b1.IsRequired();

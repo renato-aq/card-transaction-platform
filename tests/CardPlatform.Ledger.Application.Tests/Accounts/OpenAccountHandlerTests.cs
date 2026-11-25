@@ -101,6 +101,11 @@ public class OpenAccountHandlerTests
             SaveCount++;
             return Task.CompletedTask;
         }
+
+        public void DiscardChanges()
+        {
+            throw new InvalidOperationException("Handlers must not discard changes; only the retry decorator does.");
+        }
     }
 
     private sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
