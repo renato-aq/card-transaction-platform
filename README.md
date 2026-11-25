@@ -99,9 +99,10 @@ enforces the dependency rule (checked by architecture tests):
   `card` back. So the card balance is always the available balance, and a hold goes `pending` → `captured` or `voided`, both final
   (otherwise `hold_not_pending`). Holds are idempotent by id: placing the same hold again returns the existing one.
 - **Optimistic concurrency** ([ADR 0006](docs/adr/0006-use-optimistic-concurrency-for-ledger-accounts.md)): the
-  PostgreSQL `xmin` column is the concurrency token of each account. On a conflict, posting a transaction is
-  retried up to 3 times with jittered backoff; if it still conflicts the API answers `409` with
-  `code: concurrency_conflict`. Holds use the same token, so a hold cannot be captured and voided at the same time.
+  PostgreSQL `xmin` column is the concurrency token of each account. On a conflict, posting a transaction or
+  placing, capturing or voiding a hold is retried up to 3 times with jittered backoff; if it still conflicts the API
+  answers `409` with `code: concurrency_conflict`. Holds use the same token, so a hold cannot be captured and voided
+  at the same time.
 
 ### Ledger API
 
@@ -260,7 +261,8 @@ sequenceDiagram
 The Authorization talks to the Ledger through the `ILedgerClient` port, implemented by a typed `HttpClient` whose base
 address `https+http://ledger-api` is resolved by Aspire service discovery. `ServiceDefaults` adds a standard resilience
 handler with generic settings to every `HttpClient`; for the Ledger client that handler is **replaced** by a standard
-handler tuned for authorization calls (section `Ledger` in configuration, see `LedgerClientOptions`):
+handler tuned for authorization calls (section `Ledger` in configuration, see `LedgerClientOptions`;
+[ADR 0009](docs/adr/0009-fail-fast-when-the-ledger-is-unavailable.md)):
 
 | Setting | Value | Why |
 |---|---|---|
@@ -466,3 +468,4 @@ See [docs/adr](docs/adr) for the reasoning behind the main technical choices:
 6. [Use optimistic concurrency for ledger accounts](docs/adr/0006-use-optimistic-concurrency-for-ledger-accounts.md)
 7. [Model authorization holds in the ledger](docs/adr/0007-model-authorization-holds-in-the-ledger.md)
 8. [Make purchase authorization idempotent](docs/adr/0008-make-purchase-authorization-idempotent.md)
+9. [Fail fast when the Ledger is unavailable](docs/adr/0009-fail-fast-when-the-ledger-is-unavailable.md)
