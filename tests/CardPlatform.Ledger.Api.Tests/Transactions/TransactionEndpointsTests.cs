@@ -269,7 +269,7 @@ public class TransactionEndpointsTests(LedgerApiFactory factory)
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         JsonElement responses = (await ReadJsonAsync(response))
             .GetProperty("paths").GetProperty("/transactions").GetProperty("post").GetProperty("responses");
-        foreach (string status in new[] { "201", "400", "404", "422" })
+        foreach (string status in new[] { "201", "400", "404", "409", "422" })
         {
             Assert.True(responses.TryGetProperty(status, out _), $"Missing response {status}.");
         }

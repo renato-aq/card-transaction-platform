@@ -18,6 +18,7 @@ internal static class TransactionEndpoints
             .WithSummary("Posts a double-entry transaction and updates the balances of its accounts atomically.")
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
 
         return endpoints;
