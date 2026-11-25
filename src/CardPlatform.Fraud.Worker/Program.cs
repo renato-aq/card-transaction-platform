@@ -1,9 +1,6 @@
 using CardPlatform.Fraud.Worker;
 
-var builder = Host.CreateApplicationBuilder(args);
+using IHost host = FraudWorkerHost.CreateBuilder(args).Build();
 
-builder.AddServiceDefaults();
-builder.Services.AddHostedService<FraudDetectionWorker>();
-
-var host = builder.Build();
-host.Run();
+await FraudWorkerHost.InitializeAsync(host);
+await host.RunAsync();
