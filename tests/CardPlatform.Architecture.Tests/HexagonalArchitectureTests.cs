@@ -8,7 +8,9 @@ namespace CardPlatform.Architecture.Tests;
 
 /// <summary>
 /// Enforces the dependency rule of ADR 0004 (hexagonal architecture). Each service that follows it derives from
-/// this class and supplies its <see cref="ServiceLayers"/>, so every service is checked against the same rules.
+/// this class and supplies its <see cref="ServiceLayers"/>, so every service is checked against the same rules. The
+/// host layer is the entry point of the service, whether an HTTP API (Ledger, Authorization) or a worker (Fraud): no
+/// other layer depends on it.
 /// </summary>
 public abstract class HexagonalArchitectureTests(ServiceLayers layers)
 {
@@ -52,9 +54,9 @@ public abstract class HexagonalArchitectureTests(ServiceLayers layers)
     }
 
     [Fact]
-    public void Domain_does_not_depend_on_api()
+    public void Domain_does_not_depend_on_host()
     {
-        Types().That().Are(layers.DomainLayer).Should().NotDependOnAny(layers.ApiLayer)
+        Types().That().Are(layers.DomainLayer).Should().NotDependOnAny(layers.HostLayer)
             .Check(layers.Architecture);
     }
 
@@ -95,9 +97,9 @@ public abstract class HexagonalArchitectureTests(ServiceLayers layers)
     }
 
     [Fact]
-    public void Api_does_not_depend_on_messaging()
+    public void Host_does_not_depend_on_messaging()
     {
-        Types().That().Are(layers.ApiLayer).Should().NotDependOnAny(Messaging)
+        Types().That().Are(layers.HostLayer).Should().NotDependOnAny(Messaging)
             .Check(layers.Architecture);
     }
 
@@ -116,9 +118,9 @@ public abstract class HexagonalArchitectureTests(ServiceLayers layers)
     }
 
     [Fact]
-    public void Api_does_not_depend_on_kafka()
+    public void Host_does_not_depend_on_kafka()
     {
-        Types().That().Are(layers.ApiLayer).Should().NotDependOnAny(Kafka)
+        Types().That().Are(layers.HostLayer).Should().NotDependOnAny(Kafka)
             .Check(layers.Architecture);
     }
 
@@ -144,9 +146,17 @@ public abstract class HexagonalArchitectureTests(ServiceLayers layers)
     }
 
     [Fact]
-    public void Application_does_not_depend_on_api()
+    public void Application_does_not_depend_on_host()
     {
-        Types().That().Are(layers.ApplicationLayer).Should().NotDependOnAny(layers.ApiLayer)
+        Types().That().Are(layers.ApplicationLayer).Should().NotDependOnAny(layers.HostLayer)
+            .Check(layers.Architecture);
+    }
+
+    [Fact]
+    public void Infrastructure_does_not_depend_on_host()
+    {
+        // The host composes the adapters; an adapter never reaches back into the composition root.
+        Types().That().Are(layers.InfrastructureLayer).Should().NotDependOnAny(layers.HostLayer)
             .Check(layers.Architecture);
     }
 
