@@ -217,7 +217,7 @@ as the Ledger ([ADR 0004](docs/adr/0004-use-hexagonal-architecture-with-pragmati
 | Project | What lives there | Depends on |
 |---|---|---|
 | `Authorization.Domain` | `Card`, `CardAuthorization`, decline reasons, `Money` and the invariants | nothing |
-| `Authorization.Application` | Command/query handlers, idempotency rules, ports (repositories, idempotency key store, `ILedgerClient`) | Domain |
+| `Authorization.Application` | Command/query handlers, idempotency rules, ports (repositories, idempotency key store, `ILedgerClient`, outbox), event mapping | Domain, Contracts |
 | `Authorization.Infrastructure` | EF Core + PostgreSQL adapters, migrations, outbox, Ledger HTTP client | Application |
 | `Authorization.Api` | Minimal API endpoints, `Idempotency-Key` header, `Result` → `ProblemDetails`, composition root | Application, Infrastructure |
 
@@ -438,10 +438,13 @@ src/
   CardPlatform.Ledger.Application/    Ledger use cases (command/query handlers) and ports
   CardPlatform.Ledger.Infrastructure/ EF Core, PostgreSQL, migrations
   CardPlatform.Ledger.Api/            Ledger HTTP endpoints
-  CardPlatform.Fraud.Worker/
+  CardPlatform.Fraud.Domain/         Fraud entities and invariants
+  CardPlatform.Fraud.Application/    Fraud use cases and ports
+  CardPlatform.Fraud.Infrastructure/ EF Core, PostgreSQL (frauddb), migrations
+  CardPlatform.Fraud.Worker/         Fraud Worker host (composition root)
   CardPlatform.Settlement.Job/
 tests/
-  CardPlatform.Architecture.Tests/    Dependency rule between the Ledger and Authorization layers
+  CardPlatform.Architecture.Tests/    Dependency rule between the Ledger, Authorization and Fraud layers
   CardPlatform.Ledger.Domain.Tests/
   CardPlatform.Ledger.Application.Tests/
   CardPlatform.Ledger.Api.Tests/      Integration tests (WebApplicationFactory + Testcontainers PostgreSQL)
@@ -449,6 +452,9 @@ tests/
   CardPlatform.Authorization.Application.Tests/
   CardPlatform.Authorization.Infrastructure.Tests/ Ledger client against a fake Ledger (retries, timeouts, circuit)
   CardPlatform.Authorization.Api.Tests/ Integration tests (WebApplicationFactory + Testcontainers PostgreSQL, Ledger API in process)
+  CardPlatform.Fraud.Domain.Tests/
+  CardPlatform.Fraud.Application.Tests/
+  CardPlatform.Fraud.Worker.Tests/    Worker host against Testcontainers PostgreSQL (migrations)
   CardPlatform.Messaging.Tests/       Outbox publisher against Testcontainers PostgreSQL and Kafka
 docs/adr/                             Architecture Decision Records
 ```
