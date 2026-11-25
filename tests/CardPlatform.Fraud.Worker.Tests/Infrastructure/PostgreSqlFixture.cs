@@ -46,8 +46,9 @@ public sealed class PostgreSqlFixture : IAsyncLifetime
     }
 }
 
+/// <summary>The worker tests share one PostgreSQL and one Kafka container, and run one at a time.</summary>
 [CollectionDefinition(Name)]
-public sealed class PostgreSqlCollectionFixture : ICollectionFixture<PostgreSqlFixture>
+public sealed class WorkerCollectionFixture : ICollectionFixture<PostgreSqlFixture>, ICollectionFixture<KafkaFixture>
 {
-    public const string Name = "PostgreSQL";
+    public const string Name = "Worker";
 }

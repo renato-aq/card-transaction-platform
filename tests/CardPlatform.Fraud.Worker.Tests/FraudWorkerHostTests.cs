@@ -1,4 +1,3 @@
-using CardPlatform.Fraud.Infrastructure;
 using CardPlatform.Fraud.Infrastructure.Persistence;
 using CardPlatform.Fraud.Worker.Tests.Infrastructure;
 
@@ -10,10 +9,11 @@ namespace CardPlatform.Fraud.Worker.Tests;
 
 /// <summary>
 /// Starts the real Fraud Worker host (<see cref="FraudWorkerHost"/>, the same composition root as <c>Program</c>)
-/// against a PostgreSQL container, with the connection string Aspire injects for <c>.WithReference(fraudDb)</c>.
+/// against a PostgreSQL and a Kafka container, with the connection strings Aspire injects for
+/// <c>.WithReference(fraudDb)</c> and <c>.WithReference(kafka)</c>.
 /// </summary>
-[Collection(PostgreSqlCollectionFixture.Name)]
-public sealed class FraudWorkerHostTests(PostgreSqlFixture postgres)
+[Collection(WorkerCollectionFixture.Name)]
+public sealed class FraudWorkerHostTests(PostgreSqlFixture postgres, KafkaFixture kafka)
 {
     private const string InitialMigration = "InitialCreate";
 
@@ -22,7 +22,7 @@ public sealed class FraudWorkerHostTests(PostgreSqlFixture postgres)
     {
         string connectionString = await postgres.CreateDatabaseAsync();
 
-        using IHost host = FraudWorkerHost.CreateBuilder(Arguments(connectionString, Environments.Development)).Build();
+        using IHost host = WorkerHosts.Create(connectionString, kafka.BootstrapServers, Environments.Development);
         await FraudWorkerHost.InitializeAsync(host);
         await host.StartAsync();
 
@@ -44,7 +44,7 @@ public sealed class FraudWorkerHostTests(PostgreSqlFixture postgres)
     {
         string connectionString = await postgres.CreateDatabaseAsync();
 
-        using IHost host = FraudWorkerHost.CreateBuilder(Arguments(connectionString, Environments.Production)).Build();
+        using IHost host = WorkerHosts.Create(connectionString, kafka.BootstrapServers, Environments.Production);
         await FraudWorkerHost.InitializeAsync(host);
         await host.StartAsync();
 
@@ -59,15 +59,6 @@ public sealed class FraudWorkerHostTests(PostgreSqlFixture postgres)
         {
             await host.StopAsync();
         }
-    }
-
-    private static string[] Arguments(string connectionString, string environment)
-    {
-        return
-        [
-            $"--environment={environment}",
-            $"--ConnectionStrings:{DependencyInjection.ConnectionName}={connectionString}",
-        ];
     }
 
     private static async Task<string[]> AppliedMigrationsAsync(IHost host)

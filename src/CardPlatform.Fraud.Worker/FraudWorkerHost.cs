@@ -5,7 +5,8 @@ namespace CardPlatform.Fraud.Worker;
 
 /// <summary>
 /// Composition root of the Fraud Worker, shared by <c>Program</c> and the integration tests so both start the same
-/// host. It has no behaviour yet: consuming the authorization events and the fraud rules come in later steps.
+/// host. The Infrastructure layer brings the consumer of the authorization events, which records each decision in the
+/// card's purchase history once per event id (ADR 0011); the fraud rules come in a later step.
 /// </summary>
 public static class FraudWorkerHost
 {
