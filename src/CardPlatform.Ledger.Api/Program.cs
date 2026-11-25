@@ -37,6 +37,7 @@ if (app.Environment.IsDevelopment())
 app.MapDefaultEndpoints();
 app.MapAccountEndpoints();
 app.MapTransactionEndpoints();
+app.MapHoldEndpoints();
 
 await app.RunAsync();
 
