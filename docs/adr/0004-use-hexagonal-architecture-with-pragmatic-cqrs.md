@@ -64,12 +64,14 @@ The Fraud Worker and the integration events (ADR 0010) changed this decision; th
 it was written.
 
 - **The Fraud Worker follows this structure.** It is split into `CardPlatform.Fraud.Domain`, `.Application` and
-  `.Infrastructure`, with `CardPlatform.Fraud.Worker` in the role the table gives to `*.Api`: the inbound adapter
-  (the consumer of the authorization events, still to come) and composition root. Its fraud rules (velocity, amount
-  above the card's average) are real domain logic that deserves isolation and unit tests, and it needs its own
-  database (`frauddb`) for the per-card history and the messages already processed. The architecture tests apply
-  the same rules to the Ledger, the Authorization and the Fraud Worker, with the entry point generalized as the
-  "host" layer (`*.Api` or `*.Worker`).
+  `.Infrastructure`, with `CardPlatform.Fraud.Worker` in the place the table gives to `*.Api` as the composition
+  root. The inbound adapters, which map the authorization events to commands, are
+  `IIntegrationEventHandler<TEvent>` implementations in Infrastructure, the only layer that may use
+  `CardPlatform.Messaging`, hosted by the shared consumer (ADR 0011); the Worker wires them through
+  `AddFraudInfrastructure()`. Its fraud rules (velocity, amount above the card's average) are real domain logic
+  that deserves isolation and unit tests, and it needs its own database (`frauddb`) for the per-card history and
+  the messages already processed. The architecture tests apply the same rules to the Ledger, the Authorization and
+  the Fraud Worker, with the entry point generalized as the "host" layer (`*.Api` or `*.Worker`).
 - **The exception applies to the Settlement Job only**, for the reasons given above.
 - **`*.Application` may also depend on `CardPlatform.Contracts`.** The contracts are plain integration-event
   records serialized with System.Text.Json, with no framework dependency. The Authorization's Application maps its
