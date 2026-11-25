@@ -188,6 +188,31 @@ curl -s -X POST "$LEDGER/transactions" -H 'Content-Type: application/json' -d '{
 }
 ```
 
+## Authorization → Ledger
+
+The Authorization API talks to the Ledger through the `ILedgerClient` port (Application), implemented by a typed
+`HttpClient` in Authorization.Infrastructure. The base address is `https+http://ledger-api`, resolved by Aspire service
+discovery. The client uses the standard resilience handler that `ServiceDefaults` adds to every `HttpClient`, with
+settings tuned for authorization calls (section `Ledger` in configuration, see `LedgerClientOptions`):
+
+| Setting | Value | Why |
+|---|---|---|
+| Total timeout | 2 s | a card authorization cannot wait long; the whole call, retries included, fits in it |
+| Attempt timeout | 1 s | a slow attempt is abandoned while there is still budget for a retry |
+| Retries | 2, exponential backoff from 100 ms with jitter | only for calls that are safe to repeat (see below) |
+| Circuit breaker | standard defaults (opens at ≥ 10% failures over ≥ 100 attempts in 30 s, for 5 s) | stops hammering a Ledger that is down |
+
+Only safe calls are retried: reads (`GET` balance and hold) and placing a hold, which the Ledger makes idempotent by
+the hold id (a retry returns the same hold instead of creating a second one). Opening an account, capturing and voiding
+are never retried: repeating them would open another account or fail with `hold_not_pending`.
+
+**When the Ledger is down or slow** (timeout, open circuit, connection error or a `5xx` after the retries), the
+client returns the error `ledger_unavailable`, which the Authorization API answers with `503 Service Unavailable`
+(`application/problem+json`, `code: ledger_unavailable`) within about 2 seconds, instead of hanging. A capture or void
+that ends in `ledger_unavailable` has an unknown outcome and is reconciled later by reading the hold
+(`GET /holds/{id}`). Errors returned by the Ledger keep their code (e.g. `insufficient_funds`, `hold_not_pending`)
+and are classified by status: `400` validation, `404` not found, `409` conflict, `422` business rule.
+
 ## Project structure
 
 ```
@@ -197,7 +222,7 @@ src/
   CardPlatform.Contracts/             Integration events
   CardPlatform.Authorization.Domain/         Authorization entities and invariants
   CardPlatform.Authorization.Application/    Authorization use cases and ports
-  CardPlatform.Authorization.Infrastructure/ EF Core, PostgreSQL (authorizationdb), migrations
+  CardPlatform.Authorization.Infrastructure/ EF Core, PostgreSQL (authorizationdb), migrations, Ledger HTTP client
   CardPlatform.Authorization.Api/            Authorization HTTP endpoints
   CardPlatform.Ledger.Domain/         Ledger entities, value objects and invariants
   CardPlatform.Ledger.Application/    Ledger use cases (command/query handlers) and ports
@@ -212,6 +237,7 @@ tests/
   CardPlatform.Ledger.Api.Tests/      Integration tests (WebApplicationFactory + Testcontainers PostgreSQL)
   CardPlatform.Authorization.Domain.Tests/
   CardPlatform.Authorization.Application.Tests/
+  CardPlatform.Authorization.Infrastructure.Tests/ Ledger client against a fake Ledger (retries, timeouts, circuit)
   CardPlatform.Authorization.Api.Tests/ Integration tests (WebApplicationFactory + Testcontainers PostgreSQL)
 docs/adr/                             Architecture Decision Records
 ```
