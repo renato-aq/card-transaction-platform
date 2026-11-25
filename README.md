@@ -11,19 +11,24 @@ a double-entry ledger, asynchronous fraud detection and a high-volume daily sett
 
 ```mermaid
 flowchart LR
-    client([Client / POS]) -->|POST /authorizations| auth[Authorization API]
-    auth -->|balance & limits| ledger[Ledger API]
-    ledger --> db[(PostgreSQL)]
-    ledger -->|outbox| kafka{{Kafka}}
-    kafka --> fraud[Fraud Worker]
-    db --> settlement[Settlement Job]
-    settlement --> file[/Daily settlement file/]
+    client([Client / POS]) -->|"1. authorize<br/>3. capture or void"| auth[Authorization API]
+    auth --> authdb[(authorizationdb)]
+    auth -->|"2. place hold<br/>4. capture or void hold"| ledger[Ledger API]
+    ledger --> ledgerdb[(ledgerdb)]
+    ledger -.->|outbox| kafka{{Kafka}}
+    kafka -.-> fraud[Fraud Worker]
+    ledgerdb -.-> settlement[Settlement Job]
+    settlement -.-> file[/Daily settlement file/]
 ```
+
+Solid arrows are implemented; dotted arrows are the next phases (see the [roadmap](#roadmap)). A purchase is
+**authorized** first, which places a **hold** on the card balance in the Ledger, and **captured** (the money goes to
+the merchant) or **voided** (the money goes back to the card) later; see [Authorization](#authorization).
 
 | Service | Responsibility |
 |---|---|
-| **Authorization API** | Approves or declines card purchases with low latency; idempotent requests |
-| **Ledger API** | Double-entry bookkeeping, balances, transactional outbox for events |
+| **Authorization API** | Approves or declines card purchases with low latency, idempotent by `Idempotency-Key`; captures and voids them |
+| **Ledger API** | Double-entry bookkeeping, balances and authorization holds; transactional outbox for events (planned) |
 | **Fraud Worker** | Consumes transaction events and flags suspicious patterns |
 | **Settlement Job** | Generates the daily settlement file in batches from the ledger |
 
@@ -61,7 +66,8 @@ aspire run
 The Aspire dashboard URL is printed in the console. Kafka UI is available from the dashboard.
 
 Run the tests (the Ledger and Authorization API integration tests use [Testcontainers](https://testcontainers.com/) to start a
-real PostgreSQL, so the container runtime must be running):
+real PostgreSQL, so the container runtime must be running; the Authorization integration tests also run the real Ledger
+API in process, with its own database):
 
 ```bash
 dotnet test
@@ -75,21 +81,27 @@ enforces the dependency rule (checked by architecture tests):
 
 | Project | What lives there | Depends on |
 |---|---|---|
-| `Ledger.Domain` | `Account`, `LedgerTransaction`, `Entry`, `Money` and the invariants | nothing |
+| `Ledger.Domain` | `Account`, `LedgerTransaction`, `Entry`, `Hold`, `Money` and the invariants | nothing |
 | `Ledger.Application` | Command/query handlers, ports (repositories, unit of work), retry decorator | Domain |
 | `Ledger.Infrastructure` | EF Core + PostgreSQL adapters, migrations, query implementations | Application |
 | `Ledger.Api` | Minimal API endpoints, `Result` → `ProblemDetails`, composition root | Application, Infrastructure |
 
-- **Commands** (open account, post transaction) go through the domain model, which enforces the rules;
-  **queries** (balance) read the database directly into DTOs. One database, no mediator library.
+- **Commands** (open account, post transaction, place/capture/void a hold) go through the domain model, which
+  enforces the rules; **queries** (balance, hold) read the database directly into DTOs. One database, no mediator
+  library.
 - **Double-entry** ([ADR 0005](docs/adr/0005-use-double-entry-ledger-model.md)): every transaction has debits equal to
   credits and every account uses `balance = credits − debits`, so the sum of all balances is always zero.
-  A top-up debits `settlement` and credits `card`; a purchase debits `card` and credits `merchant`.
-  A card balance can never go negative.
+  Account types are `settlement`, `card`, `merchant` and `holds`. A top-up debits `settlement` and credits `card`; a
+  direct purchase debits `card` and credits `merchant`. A card balance can never go negative.
+- **Holds** ([ADR 0007](docs/adr/0007-model-authorization-holds-in-the-ledger.md)): an authorized purchase is a hold,
+  also modelled as double-entry. Placing it debits `card` and credits the `holds` account of the currency (one per
+  currency, created on first use); capturing it debits `holds` and credits `merchant`; voiding it debits `holds` and credits
+  `card` back. So the card balance is always the available balance, and a hold goes `pending` → `captured` or `voided`, both final
+  (otherwise `hold_not_pending`). Holds are idempotent by id: placing the same hold again returns the existing one.
 - **Optimistic concurrency** ([ADR 0006](docs/adr/0006-use-optimistic-concurrency-for-ledger-accounts.md)): the
   PostgreSQL `xmin` column is the concurrency token of each account. On a conflict, posting a transaction is
   retried up to 3 times with jittered backoff; if it still conflicts the API answers `409` with
-  `code: concurrency_conflict`.
+  `code: concurrency_conflict`. Holds use the same token, so a hold cannot be captured and voided at the same time.
 
 ### Ledger API
 
@@ -162,7 +174,8 @@ curl -s "$LEDGER/accounts/$CARD/balance"
 
 Errors are `application/problem+json` with a machine-readable `code`: `400` for invalid input (e.g.
 `invalid_amount`, `invalid_currency`), `404` `account_not_found`, `422` for business rules
-(`unbalanced_transaction`, `currency_mismatch`, `insufficient_funds`) and `409` `concurrency_conflict`.
+(`unbalanced_transaction`, `currency_mismatch`, `insufficient_funds`, `hold_not_pending`, `not_a_merchant_account`)
+and `409` (`concurrency_conflict`, `hold_id_conflict`).
 For example, spending more than the card holds:
 
 ```bash
@@ -188,12 +201,66 @@ curl -s -X POST "$LEDGER/transactions" -H 'Content-Type: application/json' -d '{
 }
 ```
 
-## Authorization → Ledger
+The hold endpoints (`POST /holds`, `GET /holds/{id}`, `POST /holds/{id}/capture` with a `merchantAccountId`,
+`POST /holds/{id}/void`) are called by the Authorization API; the [Authorization API examples](#authorization-api)
+show them at work.
 
-The Authorization API talks to the Ledger through the `ILedgerClient` port (Application), implemented by a typed
-`HttpClient` in Authorization.Infrastructure. The base address is `https+http://ledger-api`, resolved by Aspire service
-discovery. The client uses the standard resilience handler that `ServiceDefaults` adds to every `HttpClient`, with
-settings tuned for authorization calls (section `Ledger` in configuration, see `LedgerClientOptions`):
+## Authorization
+
+The Authorization approves or declines card purchases and later captures or voids them. It keeps its own cards and
+authorizations in its own database (`authorizationdb`) and leaves the money to the Ledger: an approved purchase is a
+hold in the Ledger ([ADR 0007](docs/adr/0007-model-authorization-holds-in-the-ledger.md)). It uses the same layering
+as the Ledger ([ADR 0004](docs/adr/0004-use-hexagonal-architecture-with-pragmatic-cqrs.md)):
+
+| Project | What lives there | Depends on |
+|---|---|---|
+| `Authorization.Domain` | `Card`, `CardAuthorization`, decline reasons, `Money` and the invariants | nothing |
+| `Authorization.Application` | Command/query handlers, idempotency rules, ports (repositories, idempotency key store, `ILedgerClient`) | Domain |
+| `Authorization.Infrastructure` | EF Core + PostgreSQL adapters, migrations, Ledger HTTP client | Application |
+| `Authorization.Api` | Minimal API endpoints, `Idempotency-Key` header, `Result` → `ProblemDetails`, composition root | Application, Infrastructure |
+
+```mermaid
+sequenceDiagram
+    participant C as Client / POS
+    participant A as Authorization API
+    participant L as Ledger API
+    C->>A: POST /authorizations with Idempotency-Key
+    A->>A: claim the key, check card and currency
+    A->>L: place hold (hold id = authorization id)
+    L-->>A: hold pending, card balance reduced
+    A-->>C: 201 approved
+    C->>A: capture the authorization
+    A->>L: capture hold to the merchant account
+    L-->>A: hold captured, merchant credited
+    A-->>C: 200 captured
+```
+
+- **Idempotency** ([ADR 0008](docs/adr/0008-make-purchase-authorization-idempotent.md)): every purchase carries an
+  `Idempotency-Key` header, unique per purchase. The key is claimed in `authorizationdb` before anything else and gets
+  an authorization id reserved for it, which is also the hold id. The same key with the same body replays the recorded
+  response byte for byte, without a second hold; the same key with a different body is `422` `idempotency_key_reused`;
+  while the first request is still running the answer is `409` `idempotency_request_in_progress`. Only authorizations
+  (approved or declined) are recorded. After a `400` or `404` the key is released; after a `503` the next request with
+  the key processes the purchase again with the same reserved id, so the Ledger returns the hold it may already have
+  instead of placing a second one.
+- **Declines** are business outcomes, not HTTP errors: an approved and a declined purchase both answer `201` and are
+  recorded. Checks run in this order: input validation (`400`), card exists (`404` `card_not_found`), card active
+  (declined `card_blocked`), currency equals the card's (declined `currency_mismatch`), hold placed in the Ledger
+  (declined `insufficient_funds`). The merchant account is only checked for format at this point; the Ledger checks it
+  on capture.
+- **Capture and void** close an `approved` authorization: capture moves the held amount to its merchant account, void
+  returns it to the card. They are not idempotent in the Ledger, so when an earlier attempt did reach the Ledger but its
+  answer was lost, the next attempt gets `hold_not_pending`; the Authorization then reads the hold and **reconciles**:
+  if the hold was completed the same way, the authorization is marked so and the call succeeds; if it was completed the
+  other way, the authorization takes that status and the call is `422`. Retrying a capture or void is therefore safe
+  without an idempotency key.
+
+### When the Ledger is down
+
+The Authorization talks to the Ledger through the `ILedgerClient` port, implemented by a typed `HttpClient` whose base
+address `https+http://ledger-api` is resolved by Aspire service discovery. `ServiceDefaults` adds a standard resilience
+handler with generic settings to every `HttpClient`; for the Ledger client that handler is **replaced** by a standard
+handler tuned for authorization calls (section `Ledger` in configuration, see `LedgerClientOptions`):
 
 | Setting | Value | Why |
 |---|---|---|
@@ -202,97 +269,149 @@ settings tuned for authorization calls (section `Ledger` in configuration, see `
 | Retries | 2, exponential backoff from 100 ms with jitter | only for calls that are safe to repeat (see below) |
 | Circuit breaker | standard defaults (opens at ≥ 10% failures over ≥ 100 attempts in 30 s, for 5 s) | stops hammering a Ledger that is down |
 
-Only safe calls are retried: reads (`GET` balance and hold) and placing a hold, which the Ledger makes idempotent by
-the hold id (a retry returns the same hold instead of creating a second one). Opening an account, capturing and voiding
-are never retried: repeating them would open another account or fail with `hold_not_pending`.
+With these budgets, an attempt that times out leaves room for only one retry; both retries are used only by fast
+failures (a `5xx`, a refused connection). Only safe calls are retried: reads (balance, hold) and placing a hold, which
+is idempotent by hold id. Opening an account, capturing and voiding are never retried by the client: repeating them
+would open a second account or fail with `hold_not_pending` (which the reconciliation above handles).
 
-**When the Ledger is down or slow** (timeout, open circuit, connection error or a `5xx` after the retries), the
-client returns the error `ledger_unavailable`, which the Authorization API answers with `503 Service Unavailable`
-(`application/problem+json`, `code: ledger_unavailable`) within about 2 seconds, instead of hanging. A capture or void
-that ends in `ledger_unavailable` has an unknown outcome and is reconciled later by reading the hold
-(`GET /holds/{id}`). Errors returned by the Ledger keep their code (e.g. `insufficient_funds`, `hold_not_pending`)
-and are classified by status: `400` validation, `404` not found, `409` conflict, `422` business rule.
+When the Ledger is down or slow (timeout, open circuit, connection error or a `5xx` after the retries), the
+Authorization API answers `503 Service Unavailable` with `code: ledger_unavailable` within about 2 seconds instead of
+hanging, and records nothing: no card is saved, no purchase is recorded (the idempotency key keeps its reserved id for
+the retry), and a capture or void leaves the authorization `approved`. Errors returned by the Ledger keep their code
+(e.g. `account_not_found`, `not_a_merchant_account`).
 
 ### Authorization API
 
 With the platform running, the Authorization API listens on `http://localhost:5272` (the `http` endpoint of
-`authorization-api` in the Aspire dashboard). Each card has its own card account in the Ledger and a status
-(`active` or `blocked`):
+`authorization-api` in the Aspire dashboard). The examples continue from the [Ledger API](#ledger-api) ones: they use
+`$LEDGER` and the `$SETTLEMENT` account to load the card, and open a new merchant account to be paid:
 
 ```bash
 AUTHZ=http://localhost:5272
-CARD_ID=$(curl -s -X POST "$AUTHZ/cards" -H 'Content-Type: application/json' -d '{"currency":"BRL"}' | jq -r .id)
+MERCHANT_ID=$(curl -s -X POST "$LEDGER/accounts" -H 'Content-Type: application/json' \
+  -d '{"type":"merchant","currency":"BRL"}' | jq -r .id)
 ```
 
-`POST /cards` opens the card account in the Ledger, then saves the card; it answers `201 Created` with
-`Location: /cards/{id}`:
+Create a card. `POST /cards` opens the card's account in the Ledger, then saves the card (status `active`):
+
+```bash
+CARD_JSON=$(curl -s -X POST "$AUTHZ/cards" -H 'Content-Type: application/json' -d '{"currency":"BRL"}')
+CARD_ID=$(echo "$CARD_JSON" | jq -r .id)
+CARD_ACCOUNT=$(echo "$CARD_JSON" | jq -r .ledgerAccountId)
+```
+
+`201 Created`, `Location: /cards/{id}`:
 
 ```json
 {"id":"<id>","ledgerAccountId":"<ledger account id>","currency":"BRL","status":"active"}
 ```
 
-Block the card (blocking a card that is already blocked also succeeds) and read it back:
+Load 100 into the card through the Ledger (debit settlement, credit the card's account):
+
+```bash
+curl -s -X POST "$LEDGER/transactions" -H 'Content-Type: application/json' -d '{
+  "description": "Card load",
+  "currency": "BRL",
+  "entries": [
+    { "accountId": "'"$SETTLEMENT"'", "direction": "debit", "amount": 100.00 },
+    { "accountId": "'"$CARD_ACCOUNT"'", "direction": "credit", "amount": 100.00 }
+  ]
+}'
+```
+
+Authorize a purchase of 30 with a new `Idempotency-Key`:
+
+```bash
+KEY=$(uuidgen)
+PURCHASE="{\"cardId\":\"$CARD_ID\",\"merchantAccountId\":\"$MERCHANT_ID\",\"amount\":30.00,\"currency\":\"BRL\"}"
+AUTH=$(curl -s -X POST "$AUTHZ/authorizations" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $KEY" -d "$PURCHASE")
+echo "$AUTH"
+AUTH_ID=$(echo "$AUTH" | jq -r .id)
+```
+
+`201 Created`, `Location: /authorizations/{id}`:
+
+```json
+{"id":"<id>","status":"approved","declineReason":null,"cardId":"<card id>","merchantAccountId":"<merchant id>","amount":30.00,"currency":"BRL","createdAt":"<timestamp>","completedAt":null}
+```
+
+Send the same purchase again with the same key, as a POS would after a timeout. The answer is the same `201` with
+exactly the same body (same id), and no second hold is placed:
+
+```bash
+curl -s -X POST "$AUTHZ/authorizations" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $KEY" -d "$PURCHASE"
+```
+
+The same key with a different body is rejected with `422` `idempotency_key_reused`:
+
+```bash
+curl -s -X POST "$AUTHZ/authorizations" -H 'Content-Type: application/json' -H "Idempotency-Key: $KEY" \
+  -d "{\"cardId\":\"$CARD_ID\",\"merchantAccountId\":\"$MERCHANT_ID\",\"amount\":50.00,\"currency\":\"BRL\"}"
+```
+
+The 30 are held, so the card balance in the Ledger is now 70:
+
+```bash
+curl -s "$LEDGER/accounts/$CARD_ACCOUNT/balance"
+```
+
+```json
+{"accountId":"<card account>","balance":{"amount":70.00,"currency":"BRL"}}
+```
+
+Capture the authorization (no body). The held 30 go to the merchant account:
+
+```bash
+curl -s -X POST "$AUTHZ/authorizations/$AUTH_ID/capture"
+curl -s "$LEDGER/accounts/$MERCHANT_ID/balance"
+```
+
+`200 OK` with the authorization, now `"status":"captured"` with a `completedAt` timestamp; the merchant balance is 30
+and the card balance stays 70. `GET /authorizations/{id}` returns the same authorization.
+
+A second purchase, this time voided: the held 20 go back to the card, whose balance returns to 70:
+
+```bash
+AUTH2_ID=$(curl -s -X POST "$AUTHZ/authorizations" -H 'Content-Type: application/json' \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -d "{\"cardId\":\"$CARD_ID\",\"merchantAccountId\":\"$MERCHANT_ID\",\"amount\":20.00,\"currency\":\"BRL\"}" | jq -r .id)
+curl -s -X POST "$AUTHZ/authorizations/$AUTH2_ID/void"
+curl -s "$LEDGER/accounts/$CARD_ACCOUNT/balance"
+```
+
+A purchase above the balance is declined, still with `201` and recorded:
+
+```bash
+curl -s -X POST "$AUTHZ/authorizations" -H 'Content-Type: application/json' -H "Idempotency-Key: $(uuidgen)" \
+  -d "{\"cardId\":\"$CARD_ID\",\"merchantAccountId\":\"$MERCHANT_ID\",\"amount\":500.00,\"currency\":\"BRL\"}"
+```
+
+```json
+{"id":"<id>","status":"declined","declineReason":"insufficient_funds","cardId":"<card id>","merchantAccountId":"<merchant id>","amount":500.00,"currency":"BRL","createdAt":"<timestamp>","completedAt":null}
+```
+
+Block the card (blocking a card that is already blocked also succeeds) and read it back; both answer `200 OK` with
+`"status":"blocked"`, and from now on its purchases are declined with `card_blocked`:
 
 ```bash
 curl -s -X POST "$AUTHZ/cards/$CARD_ID/block"
 curl -s "$AUTHZ/cards/$CARD_ID"
 ```
 
-Both answer `200 OK` with the card, now `"status":"blocked"`. Errors are `application/problem+json` with a `code`:
-`400` for invalid input (`invalid_currency`), `404` `card_not_found` and `503` `ledger_unavailable` (the Ledger could
-not open the card account; no card is saved).
+Errors are `application/problem+json` with a machine-readable `code`:
 
-Authorize a purchase, paid to a merchant account opened in the Ledger (`POST /accounts` with `"type":"merchant"`):
+| Status | Codes |
+|---|---|
+| `400` | `idempotency_key_required`, `invalid_idempotency_key`, `invalid_card_id`, `invalid_merchant_account_id`, `invalid_currency`, `invalid_amount`, `too_many_decimal_places` |
+| `404` | `card_not_found`, `authorization_not_found`, `account_not_found` (unknown merchant account, on capture) |
+| `409` | `idempotency_request_in_progress` |
+| `422` | `idempotency_key_reused`, `authorization_not_capturable`, `authorization_not_voidable`, `not_a_merchant_account` (on capture) |
+| `503` | `ledger_unavailable` |
 
-```bash
-curl -s -X POST "$AUTHZ/authorizations" -H 'Content-Type: application/json' \
-  -H "Idempotency-Key: $(uuidgen)" \
-  -d "{\"cardId\":\"$CARD_ID\",\"merchantAccountId\":\"$MERCHANT_ID\",\"amount\":30.00,\"currency\":\"BRL\"}"
-curl -s "$AUTHZ/authorizations/<id>"
-```
-
-Every purchase needs an `Idempotency-Key` header, unique per purchase
-([ADR 0008](docs/adr/0008-make-purchase-authorization-idempotent.md)). Sending the same purchase again with the same
-key returns exactly the recorded response without a second hold; the same key with a different body is `422`
-`idempotency_key_reused`, and while the first request is still running the answer is `409`
-`idempotency_request_in_progress`. A missing key is `400` `idempotency_key_required`. Failures are not recorded: after
-a `503` the same key processes the purchase again, reusing the authorization (and hold) id reserved for it.
-
-An approved purchase holds the amount in the Ledger (the hold id is the authorization id), so the card balance drops by
-it. A decline is a business outcome, not an HTTP error: both answer `201 Created` with
-`Location: /authorizations/{id}` and are recorded:
-
-```json
-{"id":"<id>","status":"declined","declineReason":"insufficient_funds","cardId":"<card id>","merchantAccountId":"<merchant id>","amount":30.00,"currency":"BRL","createdAt":"<timestamp>"}
-```
-
-Checks run in this order: input validation (`400`: `invalid_card_id`, `invalid_merchant_account_id`,
-`invalid_currency`, `invalid_amount`, `too_many_decimal_places`), card exists (`404` `card_not_found`), card active
-(declined `card_blocked`), currency equals the card's (declined `currency_mismatch`), hold in the Ledger (declined
-`insufficient_funds`). The merchant account is only checked for format here; the Ledger checks it on capture. If the
-Ledger cannot be reached the answer is `503` `ledger_unavailable` and nothing is recorded.
-
-Close the purchase by capturing the authorization (the held amount goes to its merchant account) or voiding it (the
-held amount goes back to the card). Neither takes a body:
-
-```bash
-curl -s -X POST "$AUTHZ/authorizations/<id>/capture"
-curl -s -X POST "$AUTHZ/authorizations/<id>/void"
-```
-
-Both answer `200 OK` with the authorization, now `"status":"captured"` or `"status":"voided"`, and a `completedAt`
-timestamp (`null` until then). Only `approved` authorizations can be completed: a declined, captured or voided one is
-`422` `authorization_not_capturable` / `authorization_not_voidable`, and the Ledger is not called. An unknown id is
-`404` `authorization_not_found`; if the Ledger cannot be reached the answer is `503` `ledger_unavailable` and the
-authorization stays `approved`. Other Ledger errors keep their code (e.g. `404` `account_not_found` or `422`
-`not_a_merchant_account` when the merchant account is wrong) and leave the authorization unchanged.
-
-Capture and void are not idempotent in the Ledger, so after an unknown outcome (a `503` whose request did reach the
-Ledger) the next attempt gets `hold_not_pending`. The Authorization then reads the hold and follows it: if the hold
-was already completed the same way, the authorization is marked so and the call succeeds; if it was completed the other
-way (e.g. voided when capturing), the authorization takes that status and the call is `422`
-`authorization_not_capturable` / `authorization_not_voidable`. Retrying a capture or void is therefore safe, and no
-idempotency key is needed.
+Only `approved` authorizations can be captured or voided: a declined, captured or voided one is `422`
+`authorization_not_capturable` / `authorization_not_voidable` and the Ledger is not called.
 
 ## Project structure
 
@@ -327,7 +446,7 @@ docs/adr/                             Architecture Decision Records
 
 - [x] Solution skeleton, Aspire orchestration, CI
 - [x] Ledger: double-entry accounts and transactions (EF Core + PostgreSQL)
-- [ ] Authorization API: idempotent authorization flow
+- [x] Authorization API: idempotent authorization flow with holds, capture and void
 - [ ] Transactional outbox + Kafka integration events
 - [ ] Fraud Worker: rule-based detection
 - [ ] Settlement Job: batched file generation with before/after benchmarks
