@@ -12,8 +12,10 @@ using ArchUnitArchitecture = ArchUnitNET.Domain.Architecture;
 namespace CardPlatform.Architecture.Tests;
 
 /// <summary>
-/// <c>CardPlatform.Messaging</c> holds the messaging plumbing shared by the services (the outbox table and, later, the
-/// Kafka publisher). It is used by their Infrastructure layers, so it must not know any service, nor the web stack.
+/// <c>CardPlatform.Messaging</c> holds the messaging plumbing shared by the services (the outbox table, the outbox
+/// publisher and the Kafka producer, ADR 0010). It is used by their Infrastructure layers, so it must not know any
+/// service, nor the web stack; that Domain and Application layers do not use it is checked by
+/// <see cref="HexagonalArchitectureTests"/>.
 /// </summary>
 public sealed class MessagingArchitectureTests
 {

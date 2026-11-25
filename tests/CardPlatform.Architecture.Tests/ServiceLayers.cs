@@ -22,6 +22,8 @@ public sealed class ServiceLayers
         ReflectionAssembly infrastructure,
         ReflectionAssembly api)
     {
+        DomainAssembly = domain;
+        ApplicationAssembly = application;
         Architecture = new ArchLoader()
             .LoadAssemblies(domain, application, infrastructure, api)
             .Build();
@@ -33,6 +35,10 @@ public sealed class ServiceLayers
     }
 
     public ArchUnitArchitecture Architecture { get; }
+
+    public ReflectionAssembly DomainAssembly { get; }
+
+    public ReflectionAssembly ApplicationAssembly { get; }
 
     public IObjectProvider<IType> DomainLayer { get; }
 

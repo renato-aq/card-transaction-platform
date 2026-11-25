@@ -30,6 +30,13 @@ public abstract class HexagonalArchitectureTests(ServiceLayers layers)
     private static readonly IObjectProvider<IType> Messaging =
         Types(includeReferenced: true).That().ResideInNamespaceMatching(@"^CardPlatform\.Messaging(\..+)?$").As("CardPlatform.Messaging");
 
+    // The Kafka client: wrapped by CardPlatform.Messaging and wired by Infrastructure only (ADR 0010).
+    private static readonly IObjectProvider<IType> Kafka =
+        Types(includeReferenced: true).That().ResideInNamespaceMatching(@"^Confluent\.Kafka(\..+)?$").As("Kafka");
+
+    // Assembly-level names of the messaging dependencies, checked on the compiled references as a second net.
+    private static readonly string[] MessagingAssemblyPrefixes = ["CardPlatform.Messaging", "Confluent.Kafka", "Aspire.Confluent.Kafka"];
+
     [Fact]
     public void Domain_does_not_depend_on_application()
     {
@@ -92,6 +99,41 @@ public abstract class HexagonalArchitectureTests(ServiceLayers layers)
     {
         Types().That().Are(layers.ApiLayer).Should().NotDependOnAny(Messaging)
             .Check(layers.Architecture);
+    }
+
+    [Fact]
+    public void Domain_does_not_depend_on_kafka()
+    {
+        Types().That().Are(layers.DomainLayer).Should().NotDependOnAny(Kafka)
+            .Check(layers.Architecture);
+    }
+
+    [Fact]
+    public void Application_does_not_depend_on_kafka()
+    {
+        Types().That().Are(layers.ApplicationLayer).Should().NotDependOnAny(Kafka)
+            .Check(layers.Architecture);
+    }
+
+    [Fact]
+    public void Api_does_not_depend_on_kafka()
+    {
+        Types().That().Are(layers.ApiLayer).Should().NotDependOnAny(Kafka)
+            .Check(layers.Architecture);
+    }
+
+    [Fact]
+    public void Domain_and_application_do_not_reference_messaging_or_kafka_assemblies()
+    {
+        string[] forbidden =
+        [
+            .. new[] { layers.DomainAssembly, layers.ApplicationAssembly }
+                .SelectMany(static assembly => assembly.GetReferencedAssemblies())
+                .Select(static assembly => assembly.Name ?? string.Empty)
+                .Where(static name => MessagingAssemblyPrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal))),
+        ];
+
+        Assert.Empty(forbidden);
     }
 
     [Fact]
