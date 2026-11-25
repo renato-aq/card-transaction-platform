@@ -13,6 +13,7 @@ public class AccountTests
     [InlineData(AccountType.Card)]
     [InlineData(AccountType.Merchant)]
     [InlineData(AccountType.Settlement)]
+    [InlineData(AccountType.Holds)]
     public void Opened_account_has_type_currency_creation_date_and_zero_balance(AccountType type)
     {
         Account account = Account.Open(type, Brl, Now);
