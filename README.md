@@ -242,6 +242,28 @@ Both answer `200 OK` with the card, now `"status":"blocked"`. Errors are `applic
 `400` for invalid input (`invalid_currency`), `404` `card_not_found` and `503` `ledger_unavailable` (the Ledger could
 not open the card account; no card is saved).
 
+Authorize a purchase, paid to a merchant account opened in the Ledger (`POST /accounts` with `"type":"merchant"`):
+
+```bash
+curl -s -X POST "$AUTHZ/authorizations" -H 'Content-Type: application/json' \
+  -d "{\"cardId\":\"$CARD_ID\",\"merchantAccountId\":\"$MERCHANT_ID\",\"amount\":30.00,\"currency\":\"BRL\"}"
+curl -s "$AUTHZ/authorizations/<id>"
+```
+
+An approved purchase holds the amount in the Ledger (the hold id is the authorization id), so the card balance drops by
+it. A decline is a business outcome, not an HTTP error: both answer `201 Created` with
+`Location: /authorizations/{id}` and are recorded:
+
+```json
+{"id":"<id>","status":"declined","declineReason":"insufficient_funds","cardId":"<card id>","merchantAccountId":"<merchant id>","amount":30.00,"currency":"BRL","createdAt":"<timestamp>"}
+```
+
+Checks run in this order: input validation (`400`: `invalid_card_id`, `invalid_merchant_account_id`,
+`invalid_currency`, `invalid_amount`, `too_many_decimal_places`), card exists (`404` `card_not_found`), card active
+(declined `card_blocked`), currency equals the card's (declined `currency_mismatch`), hold in the Ledger (declined
+`insufficient_funds`). The merchant account is only checked for format here; the Ledger checks it on capture. If the
+Ledger cannot be reached the answer is `503` `ledger_unavailable` and nothing is recorded.
+
 ## Project structure
 
 ```
