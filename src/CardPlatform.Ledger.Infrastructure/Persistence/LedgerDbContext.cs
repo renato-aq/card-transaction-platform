@@ -1,5 +1,6 @@
 using CardPlatform.Ledger.Application.Abstractions.Persistence;
 using CardPlatform.Ledger.Domain.Accounts;
+using CardPlatform.Ledger.Domain.Holds;
 using CardPlatform.Ledger.Domain.Transactions;
 
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,8 @@ public sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options) :
 
     public DbSet<LedgerTransaction> Transactions => Set<LedgerTransaction>();
 
+    public DbSet<Hold> Holds => Set<Hold>();
+
     async Task IUnitOfWork.SaveChangesAsync(CancellationToken cancellationToken)
     {
         try
@@ -23,10 +26,10 @@ public sealed class LedgerDbContext(DbContextOptions<LedgerDbContext> options) :
         }
         catch (DbUpdateConcurrencyException exception)
         {
-            // An account's xmin changed since it was read (ADR 0006). EF Core rolled the transaction back; the
-            // Application layer only sees its own exception type.
+            // An account's or hold's xmin changed since it was read (ADR 0006). EF Core rolled the transaction back;
+            // the Application layer only sees its own exception type.
             throw new ConcurrencyConflictException(
-                "An account was changed by another request since it was read; nothing was saved.",
+                "An account or hold was changed by another request since it was read; nothing was saved.",
                 exception);
         }
     }

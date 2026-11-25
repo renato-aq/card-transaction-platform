@@ -32,6 +32,7 @@ public static class DependencyInjection
 
         builder.Services.AddScoped<IAccountRepository, AccountRepository>();
         builder.Services.AddScoped<ILedgerTransactionRepository, LedgerTransactionRepository>();
+        builder.Services.AddScoped<IHoldRepository, HoldRepository>();
         builder.Services.AddScoped<IUnitOfWork>(static services => services.GetRequiredService<LedgerDbContext>());
 
         builder.Services.AddScoped<IQueryHandler<GetAccountBalance, AccountBalanceDto>, GetAccountBalanceHandler>();
