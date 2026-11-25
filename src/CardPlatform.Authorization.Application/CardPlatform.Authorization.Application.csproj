@@ -12,6 +12,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CardPlatform.Authorization.Domain\CardPlatform.Authorization.Domain.csproj" />
+    <ProjectReference Include="..\CardPlatform.Contracts\CardPlatform.Contracts.csproj" />
   </ItemGroup>
 
 </Project>

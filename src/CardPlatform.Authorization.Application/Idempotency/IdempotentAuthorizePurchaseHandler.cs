@@ -19,8 +19,8 @@ namespace CardPlatform.Authorization.Application.Idempotency;
 /// (<c>idempotency_request_in_progress</c>);</item>
 /// <item>the purchase is authorized with the authorization id reserved for the key, the same one on every attempt, so a
 /// hold placed by an attempt whose answer was lost is found again in the Ledger instead of placed twice;</item>
-/// <item>an authorization (approved or declined) is saved together with its response on the key, in one transaction,
-/// and the response is returned.</item>
+/// <item>an authorization (approved or declined) is saved together with its response on the key and its event in the
+/// outbox (added by the wrapped handler), in one transaction, and the response is returned.</item>
 /// </list>
 /// Failures are not stored. <see cref="ErrorType.Validation"/> and <see cref="ErrorType.NotFound"/> failures reject the
 /// request before any hold can exist, so the key is deleted and can be used again. Any other failure (e.g.

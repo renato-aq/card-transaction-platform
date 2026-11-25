@@ -2,6 +2,7 @@ using CardPlatform.Authorization.Application.Abstractions.Ledger;
 using CardPlatform.Authorization.Application.Abstractions.Persistence;
 using CardPlatform.Authorization.Domain.Authorizations;
 using CardPlatform.Authorization.Domain.Common;
+using CardPlatform.Contracts;
 
 namespace CardPlatform.Authorization.Application.Tests.Authorizations;
 
@@ -20,6 +21,37 @@ internal sealed class FakeAuthorizationRepository(params CardAuthorization[] exi
     {
         Added.Add(authorization);
         _authorizations.Add(authorization);
+    }
+}
+
+/// <summary>An event added to the <see cref="FakeOutbox"/>.</summary>
+internal sealed record OutboxEntry(IIntegrationEvent Event, Guid EventId, DateTimeOffset OccurredAt);
+
+/// <summary>Outbox that records the events added to it.</summary>
+internal sealed class FakeOutbox : IOutbox
+{
+    public List<OutboxEntry> Added { get; } = [];
+
+    public void Add(IIntegrationEvent integrationEvent, Guid eventId, DateTimeOffset occurredAt)
+    {
+        Added.Add(new OutboxEntry(integrationEvent, eventId, occurredAt));
+    }
+}
+
+/// <summary>
+/// Unit of work that counts saves and records how many events the <see cref="FakeOutbox"/> held at each one: an event
+/// counted there was added before the save, so the real adapter would insert it in that save's transaction.
+/// </summary>
+internal sealed class OutboxUnitOfWork(FakeOutbox outbox) : IUnitOfWork
+{
+    public int SaveCount => EventsAtSave.Count;
+
+    public List<int> EventsAtSave { get; } = [];
+
+    public Task SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        EventsAtSave.Add(outbox.Added.Count);
+        return Task.CompletedTask;
     }
 }
 
