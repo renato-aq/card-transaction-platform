@@ -1,6 +1,9 @@
+using CardPlatform.Ledger.Application.Abstractions.Messaging;
 using CardPlatform.Ledger.Application.Abstractions.Persistence;
+using CardPlatform.Ledger.Application.Accounts;
 using CardPlatform.Ledger.Infrastructure.Persistence;
 using CardPlatform.Ledger.Infrastructure.Persistence.Repositories;
+using CardPlatform.Ledger.Infrastructure.Queries;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -15,7 +18,8 @@ public static class DependencyInjection
 
     /// <summary>
     /// Registers the <see cref="LedgerDbContext"/> through the Aspire PostgreSQL integration (connection string
-    /// <c>ledgerdb</c>, health check, retries, telemetry) and the persistence adapters.
+    /// <c>ledgerdb</c>, health check, retries, telemetry), the persistence adapters and the query handlers, which
+    /// read the database directly.
     /// </summary>
     public static TBuilder AddLedgerInfrastructure<TBuilder>(this TBuilder builder)
         where TBuilder : IHostApplicationBuilder
@@ -29,6 +33,8 @@ public static class DependencyInjection
         builder.Services.AddScoped<IAccountRepository, AccountRepository>();
         builder.Services.AddScoped<ILedgerTransactionRepository, LedgerTransactionRepository>();
         builder.Services.AddScoped<IUnitOfWork>(static services => services.GetRequiredService<LedgerDbContext>());
+
+        builder.Services.AddScoped<IQueryHandler<GetAccountBalance, AccountBalanceDto>, GetAccountBalanceHandler>();
 
         return builder;
     }

@@ -15,6 +15,7 @@
     <Project Path="tests/CardPlatform.Architecture.Tests/CardPlatform.Architecture.Tests.csproj" />
     <Project Path="tests/CardPlatform.Authorization.Api.Tests/CardPlatform.Authorization.Api.Tests.csproj" />
     <Project Path="tests/CardPlatform.Ledger.Api.Tests/CardPlatform.Ledger.Api.Tests.csproj" />
+    <Project Path="tests/CardPlatform.Ledger.Application.Tests/CardPlatform.Ledger.Application.Tests.csproj" />
     <Project Path="tests/CardPlatform.Ledger.Domain.Tests/CardPlatform.Ledger.Domain.Tests.csproj" />
   </Folder>
 </Solution>
