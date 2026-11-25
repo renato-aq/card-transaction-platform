@@ -52,6 +52,12 @@ Run the whole platform (PostgreSQL, Kafka and all services) with one command:
 dotnet run --project src/CardPlatform.AppHost
 ```
 
+Or, with the [Aspire CLI](https://aspire.dev) installed, from the repository root:
+
+```bash
+aspire run
+```
+
 The Aspire dashboard URL is printed in the console. Kafka UI is available from the dashboard.
 
 Run the tests:
