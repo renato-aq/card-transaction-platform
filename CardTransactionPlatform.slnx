@@ -11,6 +11,7 @@
     <Project Path="src/CardPlatform.Ledger.Application/CardPlatform.Ledger.Application.csproj" />
     <Project Path="src/CardPlatform.Ledger.Domain/CardPlatform.Ledger.Domain.csproj" />
     <Project Path="src/CardPlatform.Ledger.Infrastructure/CardPlatform.Ledger.Infrastructure.csproj" />
+    <Project Path="src/CardPlatform.Messaging/CardPlatform.Messaging.csproj" />
     <Project Path="src/CardPlatform.ServiceDefaults/CardPlatform.ServiceDefaults.csproj" />
     <Project Path="src/CardPlatform.Settlement.Job/CardPlatform.Settlement.Job.csproj" />
   </Folder>
