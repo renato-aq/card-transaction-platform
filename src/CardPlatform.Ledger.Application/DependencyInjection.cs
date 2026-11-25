@@ -1,5 +1,6 @@
 using CardPlatform.Ledger.Application.Abstractions.Messaging;
 using CardPlatform.Ledger.Application.Accounts;
+using CardPlatform.Ledger.Application.Transactions;
 
 using Microsoft.Extensions.DependencyInjection;
 
@@ -16,6 +17,7 @@ public static class DependencyInjection
         ArgumentNullException.ThrowIfNull(services);
 
         services.AddScoped<ICommandHandler<OpenAccount, AccountDto>, OpenAccountHandler>();
+        services.AddScoped<ICommandHandler<PostTransaction, LedgerTransactionDto>, PostTransactionHandler>();
 
         return services;
     }
