@@ -1,4 +1,5 @@
 using CardPlatform.Authorization.Application.Abstractions.Messaging;
+using CardPlatform.Authorization.Application.Authorizations;
 using CardPlatform.Authorization.Application.Cards;
 
 using Microsoft.Extensions.DependencyInjection;
@@ -18,6 +19,7 @@ public static class DependencyInjection
 
         services.AddScoped<ICommandHandler<CreateCard, CardDto>, CreateCardHandler>();
         services.AddScoped<ICommandHandler<BlockCard, CardDto>, BlockCardHandler>();
+        services.AddScoped<ICommandHandler<AuthorizePurchase, AuthorizationDto>, AuthorizePurchaseHandler>();
 
         return services;
     }
