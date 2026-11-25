@@ -6,6 +6,7 @@ using CardPlatform.Authorization.Application.Cards;
 using CardPlatform.Authorization.Infrastructure.Ledger;
 using CardPlatform.Authorization.Infrastructure.Persistence;
 using CardPlatform.Authorization.Infrastructure.Persistence.Idempotency;
+using CardPlatform.Authorization.Infrastructure.Persistence.Outbox;
 using CardPlatform.Authorization.Infrastructure.Persistence.Repositories;
 using CardPlatform.Authorization.Infrastructure.Queries;
 
@@ -27,8 +28,9 @@ public static class DependencyInjection
 
     /// <summary>
     /// Registers the <see cref="AuthorizationDbContext"/> through the Aspire PostgreSQL integration (connection string
-    /// <c>authorizationdb</c>, health check, retries, telemetry), the persistence adapters, the query handlers, which
-    /// read the database directly, and the Ledger client.
+    /// <c>authorizationdb</c>, health check, retries, telemetry), the persistence adapters (including the outbox, which
+    /// needs a <see cref="TimeProvider"/> from the composition root), the query handlers, which read the database
+    /// directly, and the Ledger client.
     /// </summary>
     public static TBuilder AddAuthorizationInfrastructure<TBuilder>(this TBuilder builder)
         where TBuilder : IHostApplicationBuilder
@@ -42,6 +44,7 @@ public static class DependencyInjection
         builder.Services.AddScoped<ICardRepository, CardRepository>();
         builder.Services.AddScoped<IAuthorizationRepository, AuthorizationRepository>();
         builder.Services.AddScoped<IIdempotencyKeyStore, IdempotencyKeyStore>();
+        builder.Services.AddScoped<IOutbox, EfOutbox>();
         builder.Services.AddScoped<IUnitOfWork>(static services => services.GetRequiredService<AuthorizationDbContext>());
 
         builder.Services.AddScoped<IQueryHandler<GetCard, CardDto>, GetCardHandler>();

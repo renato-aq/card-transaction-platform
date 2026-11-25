@@ -3,6 +3,7 @@ using CardPlatform.Authorization.Domain.Authorizations;
 using CardPlatform.Authorization.Domain.Cards;
 using CardPlatform.Authorization.Infrastructure.Persistence.Configurations;
 using CardPlatform.Authorization.Infrastructure.Persistence.Idempotency;
+using CardPlatform.Messaging.Outbox;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -11,8 +12,8 @@ using Npgsql;
 namespace CardPlatform.Authorization.Infrastructure.Persistence;
 
 /// <summary>
-/// EF Core context of the Authorization. Mappings live in <c>IEntityTypeConfiguration</c> classes of this assembly;
-/// the domain model has no EF attributes.
+/// EF Core context of the Authorization. Mappings live in <c>IEntityTypeConfiguration</c> classes of this assembly,
+/// except the outbox's, shared through <c>CardPlatform.Messaging</c>; the domain model has no EF attributes.
 /// </summary>
 public sealed class AuthorizationDbContext(DbContextOptions<AuthorizationDbContext> options) : DbContext(options), IUnitOfWork
 {
@@ -22,7 +23,27 @@ public sealed class AuthorizationDbContext(DbContextOptions<AuthorizationDbConte
 
     public DbSet<IdempotencyKeyRecord> IdempotencyKeys => Set<IdempotencyKeyRecord>();
 
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    /// <remarks>
+    /// When the save fails, EF Core rolls its transaction back and every tracked change is then discarded, so nothing that
+    /// was meant to be saved with it (an authorization, its outbox event, an idempotency key completion) can be written
+    /// by a later save in the same scope.
+    /// </remarks>
     async Task IUnitOfWork.SaveChangesAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await SaveTrackedChangesAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            ChangeTracker.Clear();
+            throw;
+        }
+    }
+
+    private async Task SaveTrackedChangesAsync(CancellationToken cancellationToken)
     {
         try
         {
@@ -58,5 +79,6 @@ public sealed class AuthorizationDbContext(DbContextOptions<AuthorizationDbConte
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AuthorizationDbContext).Assembly);
+        modelBuilder.ApplyOutbox();
     }
 }
