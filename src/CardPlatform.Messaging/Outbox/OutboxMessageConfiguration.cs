@@ -15,7 +15,7 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
     public const string PrimaryKeyName = "pk_outbox_messages";
 
     /// <summary>
-    /// Partial index of the rows still to publish, in the order they were written: what the publisher reads.
+    /// Partial index of the rows still to publish, by row id: the publisher reads them in id order (ADR 0010).
     /// </summary>
     public const string UnpublishedIndexName = "ix_outbox_messages_unpublished";
 
@@ -45,7 +45,9 @@ public sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<Outbox
 
         // CreatedAt and PublishedAt are timestamptz; Npgsql only writes UTC offsets, so OutboxMessage stores them in UTC.
 
-        builder.HasIndex(message => new { message.CreatedAt, message.Id })
+        // By id, not by created_at: created_at comes from each instance's clock, while ids come from one sequence and
+        // follow the order of causally related writes (ADR 0010).
+        builder.HasIndex(message => message.Id)
             .HasDatabaseName(UnpublishedIndexName)
             .HasFilter("published_at IS NULL");
     }

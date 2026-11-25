@@ -31,7 +31,10 @@ public sealed class OutboxMessage
         CreatedAt = createdAt;
     }
 
-    /// <summary>Row id (identity), also the order in which rows were written.</summary>
+    /// <summary>
+    /// Row id (identity), also the order in which rows were written: the publisher sends the rows in this order (see
+    /// ADR 0010 for what that guarantees).
+    /// </summary>
     public long Id { get; private set; }
 
     /// <summary>The <see cref="EventEnvelope.EventId"/> of the event.</summary>
@@ -74,6 +77,21 @@ public sealed class OutboxMessage
             topic,
             EventSerializer.Serialize(envelope),
             TruncateToMicroseconds(createdAt.ToUniversalTime()));
+    }
+
+    /// <summary>Counts one more attempt to publish the event, made before each send (successful or not).</summary>
+    public void RecordAttempt()
+    {
+        Attempts++;
+    }
+
+    /// <summary>
+    /// Marks the event as published at <paramref name="publishedAt"/> (stored in UTC, whole microseconds). Called only
+    /// after the broker acknowledged the event.
+    /// </summary>
+    public void MarkPublished(DateTimeOffset publishedAt)
+    {
+        PublishedAt = TruncateToMicroseconds(publishedAt.ToUniversalTime());
     }
 
     /// <summary>Reads <see cref="Payload"/> back as an envelope.</summary>
