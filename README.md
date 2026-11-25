@@ -60,7 +60,7 @@ aspire run
 
 The Aspire dashboard URL is printed in the console. Kafka UI is available from the dashboard.
 
-Run the tests (the Ledger API integration tests use [Testcontainers](https://testcontainers.com/) to start a
+Run the tests (the Ledger and Authorization API integration tests use [Testcontainers](https://testcontainers.com/) to start a
 real PostgreSQL, so the container runtime must be running):
 
 ```bash
@@ -195,7 +195,10 @@ src/
   CardPlatform.AppHost/               Aspire orchestration
   CardPlatform.ServiceDefaults/       Shared observability, health checks, resilience
   CardPlatform.Contracts/             Integration events
-  CardPlatform.Authorization.Api/
+  CardPlatform.Authorization.Domain/         Authorization entities and invariants
+  CardPlatform.Authorization.Application/    Authorization use cases and ports
+  CardPlatform.Authorization.Infrastructure/ EF Core, PostgreSQL (authorizationdb), migrations
+  CardPlatform.Authorization.Api/            Authorization HTTP endpoints
   CardPlatform.Ledger.Domain/         Ledger entities, value objects and invariants
   CardPlatform.Ledger.Application/    Ledger use cases (command/query handlers) and ports
   CardPlatform.Ledger.Infrastructure/ EF Core, PostgreSQL, migrations
@@ -203,11 +206,13 @@ src/
   CardPlatform.Fraud.Worker/
   CardPlatform.Settlement.Job/
 tests/
-  CardPlatform.Architecture.Tests/    Dependency rule between the Ledger layers
+  CardPlatform.Architecture.Tests/    Dependency rule between the Ledger and Authorization layers
   CardPlatform.Ledger.Domain.Tests/
   CardPlatform.Ledger.Application.Tests/
   CardPlatform.Ledger.Api.Tests/      Integration tests (WebApplicationFactory + Testcontainers PostgreSQL)
-  CardPlatform.Authorization.Api.Tests/
+  CardPlatform.Authorization.Domain.Tests/
+  CardPlatform.Authorization.Application.Tests/
+  CardPlatform.Authorization.Api.Tests/ Integration tests (WebApplicationFactory + Testcontainers PostgreSQL)
 docs/adr/                             Architecture Decision Records
 ```
 
