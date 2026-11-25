@@ -11,9 +11,10 @@ namespace CardPlatform.Architecture.Tests;
 
 /// <summary>
 /// The four layers of a service that follows ADR 0004 (<c>*.Domain</c>, <c>*.Application</c>,
-/// <c>*.Infrastructure</c> and the host), each located through its assembly marker. The host is the inbound adapter
-/// and composition root, the entry point of the service: <c>*.Api</c> for the HTTP services, <c>*.Worker</c> for
-/// the Fraud Worker. It is named after the last segment of its assembly name (e.g. "Ledger Api", "Fraud Worker").
+/// <c>*.Infrastructure</c> and the host), each located through its assembly marker. The host is the entry point
+/// and composition root of the service: <c>*.Api</c> with the endpoints of the HTTP services, <c>*.Worker</c> for
+/// the Fraud Worker, which wires the Infrastructure's message consumers. It is named after the last segment of its
+/// assembly name (e.g. "Ledger Api", "Fraud Worker").
 /// </summary>
 public sealed class ServiceLayers
 {
