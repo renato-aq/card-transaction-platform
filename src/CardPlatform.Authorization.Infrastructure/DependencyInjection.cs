@@ -9,6 +9,9 @@ using CardPlatform.Authorization.Infrastructure.Persistence.Idempotency;
 using CardPlatform.Authorization.Infrastructure.Persistence.Outbox;
 using CardPlatform.Authorization.Infrastructure.Persistence.Repositories;
 using CardPlatform.Authorization.Infrastructure.Queries;
+using CardPlatform.Contracts;
+using CardPlatform.Messaging;
+using CardPlatform.Messaging.Publishing;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -30,7 +33,10 @@ public static class DependencyInjection
     /// Registers the <see cref="AuthorizationDbContext"/> through the Aspire PostgreSQL integration (connection string
     /// <c>authorizationdb</c>, health check, retries, telemetry), the persistence adapters (including the outbox, which
     /// needs a <see cref="TimeProvider"/> from the composition root), the query handlers, which read the database
-    /// directly, and the Ledger client.
+    /// directly, the Ledger client and the outbox publisher, which sends the decisions written to the outbox to Kafka
+    /// (connection string <c>kafka</c>, settings in <c>Messaging:Outbox</c>, see ADR 0010). In Development the Kafka
+    /// topics the Authorization uses are created on startup. With <c>Messaging:Outbox:Enabled</c> set to
+    /// <see langword="false"/> neither is registered and the decisions stay in the outbox.
     /// </summary>
     public static TBuilder AddAuthorizationInfrastructure<TBuilder>(this TBuilder builder)
         where TBuilder : IHostApplicationBuilder
@@ -51,6 +57,18 @@ public static class DependencyInjection
         builder.Services.AddScoped<IQueryHandler<GetAuthorization, AuthorizationDto>, GetAuthorizationHandler>();
 
         builder.Services.AddLedgerClient();
+
+        if (OutboxPublisherOptions.IsEnabled(builder.Configuration))
+        {
+            if (builder.Environment.IsDevelopment())
+            {
+                // The topic it publishes on and the one it will consume (fraud signals); registered first, so the
+                // topics exist before the publisher starts.
+                builder.AddKafkaTopicInitializer([Topics.Authorizations, Topics.FraudSignals]);
+            }
+
+            builder.AddOutboxPublisher<AuthorizationDbContext>();
+        }
 
         return builder;
     }

@@ -214,7 +214,7 @@ namespace CardPlatform.Authorization.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_outbox_messages");
 
-                    b.HasIndex("CreatedAt", "Id")
+                    b.HasIndex("Id")
                         .HasDatabaseName("ix_outbox_messages_unpublished")
                         .HasFilter("published_at IS NULL");
 
