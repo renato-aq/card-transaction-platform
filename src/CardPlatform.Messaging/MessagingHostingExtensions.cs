@@ -1,5 +1,7 @@
 using Aspire.Confluent.Kafka;
 
+using CardPlatform.Contracts;
+using CardPlatform.Messaging.Consuming;
 using CardPlatform.Messaging.Kafka;
 using CardPlatform.Messaging.Publishing;
 
@@ -20,6 +22,9 @@ public static class MessagingHostingExtensions
 
     /// <summary>Configuration section of the Aspire Kafka producer settings.</summary>
     private const string KafkaProducerSettingsSection = "Aspire:Confluent:Kafka:Producer";
+
+    /// <summary>Configuration section of the Aspire Kafka consumer settings.</summary>
+    private const string KafkaConsumerSettingsSection = "Aspire:Confluent:Kafka:Consumer";
 
     /// <summary>
     /// Registers the outbox publisher of <typeparamref name="TDbContext"/> (whose model applies
@@ -68,6 +73,85 @@ public static class MessagingHostingExtensions
         builder.Services.AddHostedService<OutboxPublisher<TDbContext>>();
 
         return builder;
+    }
+
+    /// <summary>
+    /// Registers the integration event consumer of <typeparamref name="TDbContext"/> (whose model applies
+    /// <see cref="ProcessedMessageModelBuilderExtensions.ApplyProcessedMessages"/>), ADR 0011: a background service that
+    /// consumes <paramref name="topics"/> (or those of <c>Messaging:Consumer:Topics</c>, see
+    /// <see cref="IntegrationEventConsumerOptions"/>) and processes each event once per event id with the handlers
+    /// registered by <see cref="AddIntegrationEventHandler{TEvent, THandler}"/>, committing each offset after the database
+    /// transaction. The Kafka consumer comes from the Aspire integration (connection string
+    /// <paramref name="connectionName"/>, telemetry; its health check is off unless configured), in consumer group
+    /// <paramref name="groupId"/> unless <c>Aspire:Confluent:Kafka:Consumer:Config:GroupId</c> says otherwise, without
+    /// automatic commits and, for a new group, from the earliest offset (<see cref="KafkaConsumerDefaults"/>). One
+    /// consumer per host. The context's database must be PostgreSQL.
+    /// </summary>
+    public static IHostApplicationBuilder AddIntegrationEventConsumer<TDbContext>(
+        this IHostApplicationBuilder builder,
+        string groupId,
+        IEnumerable<string> topics,
+        string connectionName = DefaultKafkaConnectionName)
+        where TDbContext : DbContext
+    {
+        ArgumentNullException.ThrowIfNull(builder);
+        ArgumentException.ThrowIfNullOrWhiteSpace(groupId);
+        ArgumentNullException.ThrowIfNull(topics);
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionName);
+
+        string[] defaultTopics = [.. topics.Distinct(StringComparer.Ordinal)];
+
+        builder.Services.AddOptions<IntegrationEventConsumerOptions>()
+            .BindConfiguration(IntegrationEventConsumerOptions.SectionName)
+            .PostConfigure(options =>
+            {
+                if (options.Topics.Count == 0)
+                {
+                    foreach (string topic in defaultTopics)
+                    {
+                        options.Topics.Add(topic);
+                    }
+                }
+            })
+            .Validate(static options => options.IsValid(), "Invalid integration event consumer settings (Messaging:Consumer).")
+            .ValidateOnStart();
+
+        // As for the producer, readiness does not depend on Kafka: an outage only delays processing, and the events
+        // wait in Kafka. Set Aspire:Confluent:Kafka:Consumer:DisableHealthChecks to false to turn the check on.
+        bool healthCheckConfigured =
+            builder.Configuration[$"{KafkaConsumerSettingsSection}:{nameof(KafkaConsumerSettings.DisableHealthChecks)}"] is not null;
+
+        builder.AddKafkaConsumer<string, byte[]>(connectionName, settings =>
+        {
+            KafkaConsumerDefaults.Apply(settings.Config, groupId);
+            if (!healthCheckConfigured)
+            {
+                settings.DisableHealthChecks = true;
+            }
+        });
+
+        builder.Services.TryAddSingleton(TimeProvider.System);
+        builder.Services.TryAddSingleton<IntegrationEventProcessor<TDbContext>>();
+        builder.Services.AddHostedService<IntegrationEventConsumer<TDbContext>>();
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Registers <typeparamref name="THandler"/> (scoped) as the handler of the integration event
+    /// <typeparamref name="TEvent"/>, called by the consumer of <see cref="AddIntegrationEventConsumer{TDbContext}"/>.
+    /// Events with no handler are logged and ignored.
+    /// </summary>
+    public static IServiceCollection AddIntegrationEventHandler<TEvent, THandler>(this IServiceCollection services)
+        where TEvent : IIntegrationEvent
+        where THandler : class, IIntegrationEventHandler<TEvent>
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddScoped<IIntegrationEventHandler<TEvent>, THandler>();
+        services.AddSingleton(IntegrationEventHandlerRegistration.For<TEvent>());
+
+        return services;
     }
 
     /// <summary>

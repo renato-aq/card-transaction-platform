@@ -13,10 +13,6 @@ public static class OutboxRetryDelay
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(consecutiveFailures);
         ArgumentNullException.ThrowIfNull(options);
 
-        // 2^20 times any sensible initial delay is far beyond the maximum; capping the exponent avoids overflow.
-        double factor = Math.Pow(2, Math.Min(consecutiveFailures - 1, 20));
-        double ticks = Math.Min(options.RetryInitialDelay.Ticks * factor, options.RetryMaxDelay.Ticks);
-
-        return TimeSpan.FromTicks((long)ticks);
+        return ExponentialBackoff.For(consecutiveFailures, options.RetryInitialDelay, options.RetryMaxDelay);
     }
 }

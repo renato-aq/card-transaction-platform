@@ -2,6 +2,7 @@ using System.Globalization;
 
 using CardPlatform.Contracts;
 using CardPlatform.Contracts.Authorizations;
+using CardPlatform.Messaging.Consuming;
 using CardPlatform.Messaging.Outbox;
 
 using Confluent.Kafka;
@@ -11,6 +12,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 using Testcontainers.Kafka;
 using Testcontainers.PostgreSql;
@@ -60,7 +62,7 @@ public sealed class MessagingFixture : IAsyncLifetime
     public async Task ResetOutboxAsync()
     {
         await using TestOutboxDbContext dbContext = CreateDbContext();
-        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE outbox_messages RESTART IDENTITY");
+        await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE outbox_messages, processed_messages RESTART IDENTITY");
     }
 
     /// <summary>Creates a new topic with a unique name and <paramref name="partitions"/> partitions.</summary>
@@ -96,6 +98,92 @@ public sealed class MessagingFixture : IAsyncLifetime
         configureServices?.Invoke(builder.Services);
 
         return builder.Build();
+    }
+
+    /// <summary>
+    /// A host (not started) with the integration event consumer registered as a service would register it, for
+    /// <see cref="TestOutboxDbContext"/>, consuming <paramref name="topic"/> in <paramref name="groupId"/> with short retry
+    /// delays, and <see cref="RecordingApprovedHandler"/> as the handler of <see cref="AuthorizationApproved"/>.
+    /// </summary>
+    public IHost CreateConsumerHost(
+        string topic,
+        string groupId,
+        Action<IServiceCollection>? configureServices = null,
+        LogCapture? logs = null)
+    {
+        HostApplicationBuilder builder = Host.CreateApplicationBuilder(
+            new HostApplicationBuilderSettings { DisableDefaults = true, EnvironmentName = Environments.Production });
+
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            [$"ConnectionStrings:{MessagingHostingExtensions.DefaultKafkaConnectionName}"] = BootstrapServers,
+            ["Messaging:Consumer:RetryInitialDelay"] = "00:00:00.100",
+            ["Messaging:Consumer:RetryMaxDelay"] = "00:00:00.500",
+        });
+
+        builder.Services.AddDbContext<TestOutboxDbContext>(options => TestOutboxDbContext.Configure(options, ConnectionString));
+        if (logs is not null)
+        {
+            builder.Logging.SetMinimumLevel(LogLevel.Debug).AddProvider(logs);
+        }
+
+        builder.AddIntegrationEventConsumer<TestOutboxDbContext>(groupId, [topic]);
+        builder.Services.AddSingleton<HandlerProbe>();
+        builder.Services.AddIntegrationEventHandler<AuthorizationApproved, RecordingApprovedHandler>();
+        configureServices?.Invoke(builder.Services);
+
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// The services the processor needs, without Kafka: <see cref="TestOutboxDbContext"/>, a
+    /// <see cref="RecordingApprovedHandler"/> and the <see cref="IntegrationEventProcessor{TDbContext}"/>.
+    /// </summary>
+    public ServiceProvider CreateProcessorServices(Action<IServiceCollection>? configureServices = null)
+    {
+        ServiceCollection services = new();
+        services.AddLogging();
+        services.AddSingleton(TimeProvider.System);
+        services.AddDbContext<TestOutboxDbContext>(options => TestOutboxDbContext.Configure(options, ConnectionString));
+        services.AddSingleton<HandlerProbe>();
+        services.AddIntegrationEventHandler<AuthorizationApproved, RecordingApprovedHandler>();
+        services.AddSingleton<IntegrationEventProcessor<TestOutboxDbContext>>();
+        configureServices?.Invoke(services);
+
+        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true, ValidateOnBuild = true });
+    }
+
+    /// <summary>Sends <paramref name="value"/> to <paramref name="topic"/> with key <paramref name="key"/> and waits for the acknowledgement.</summary>
+    public async Task ProduceAsync(string topic, string key, byte[] value)
+    {
+        using IProducer<string, byte[]> producer =
+            new ProducerBuilder<string, byte[]>(new ProducerConfig { BootstrapServers = BootstrapServers }).Build();
+        await producer.ProduceAsync(topic, new Message<string, byte[]> { Key = key, Value = value });
+    }
+
+    /// <summary>The offset committed by <paramref name="groupId"/> on each partition of <paramref name="topic"/> (-1001 when none).</summary>
+    public Dictionary<int, long> CommittedOffsets(string groupId, string topic)
+    {
+        using IAdminClient admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = BootstrapServers }).Build();
+        Metadata metadata = admin.GetMetadata(topic, TimeSpan.FromSeconds(10));
+
+        using IConsumer<string, byte[]> consumer = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
+        {
+            BootstrapServers = BootstrapServers,
+            GroupId = groupId,
+        }).Build();
+
+        return consumer
+            .Committed(
+                metadata.Topics.Single().Partitions.Select(partition => new TopicPartition(topic, partition.PartitionId)),
+                TimeSpan.FromSeconds(10))
+            .ToDictionary(offset => offset.Partition.Value, offset => offset.Offset.Value);
+    }
+
+    public async Task<List<ProcessedMessage>> ReadProcessedMessagesAsync()
+    {
+        await using TestOutboxDbContext dbContext = CreateDbContext();
+        return await dbContext.ProcessedMessages.AsNoTracking().ToListAsync();
     }
 
     /// <summary>Writes one row per card id, in order, each in its own transaction, and returns them as written.</summary>
