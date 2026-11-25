@@ -213,6 +213,35 @@ that ends in `ledger_unavailable` has an unknown outcome and is reconciled later
 (`GET /holds/{id}`). Errors returned by the Ledger keep their code (e.g. `insufficient_funds`, `hold_not_pending`)
 and are classified by status: `400` validation, `404` not found, `409` conflict, `422` business rule.
 
+### Authorization API
+
+With the platform running, the Authorization API listens on `http://localhost:5272` (the `http` endpoint of
+`authorization-api` in the Aspire dashboard). Each card has its own card account in the Ledger and a status
+(`active` or `blocked`):
+
+```bash
+AUTHZ=http://localhost:5272
+CARD_ID=$(curl -s -X POST "$AUTHZ/cards" -H 'Content-Type: application/json' -d '{"currency":"BRL"}' | jq -r .id)
+```
+
+`POST /cards` opens the card account in the Ledger, then saves the card; it answers `201 Created` with
+`Location: /cards/{id}`:
+
+```json
+{"id":"<id>","ledgerAccountId":"<ledger account id>","currency":"BRL","status":"active"}
+```
+
+Block the card (blocking a card that is already blocked also succeeds) and read it back:
+
+```bash
+curl -s -X POST "$AUTHZ/cards/$CARD_ID/block"
+curl -s "$AUTHZ/cards/$CARD_ID"
+```
+
+Both answer `200 OK` with the card, now `"status":"blocked"`. Errors are `application/problem+json` with a `code`:
+`400` for invalid input (`invalid_currency`), `404` `card_not_found` and `503` `ledger_unavailable` (the Ledger could
+not open the card account; no card is saved).
+
 ## Project structure
 
 ```
@@ -238,7 +267,7 @@ tests/
   CardPlatform.Authorization.Domain.Tests/
   CardPlatform.Authorization.Application.Tests/
   CardPlatform.Authorization.Infrastructure.Tests/ Ledger client against a fake Ledger (retries, timeouts, circuit)
-  CardPlatform.Authorization.Api.Tests/ Integration tests (WebApplicationFactory + Testcontainers PostgreSQL)
+  CardPlatform.Authorization.Api.Tests/ Integration tests (WebApplicationFactory + Testcontainers PostgreSQL, Ledger API in process)
 docs/adr/                             Architecture Decision Records
 ```
 
