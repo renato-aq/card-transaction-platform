@@ -45,6 +45,7 @@ public sealed class LedgerTransaction
 
     public string? Description { get; }
 
+    /// <summary>When the transaction was created, in whole microseconds (see <see cref="Timestamps"/>).</summary>
     public DateTimeOffset CreatedAt { get; }
 
     public IReadOnlyList<Entry> Entries => _entries.AsReadOnly();
@@ -78,10 +79,11 @@ public sealed class LedgerTransaction
         }
 
         string? normalizedDescription = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        DateTimeOffset recordedAt = createdAt.TruncateToMicroseconds();
         return Result.Success(new LedgerTransaction(
-            Guid.CreateVersion7(createdAt),
+            Guid.CreateVersion7(recordedAt),
             normalizedDescription,
-            createdAt,
+            recordedAt,
             entryList));
     }
 

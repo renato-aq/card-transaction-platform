@@ -60,6 +60,21 @@ public class PlaceHoldHandlerTests
     }
 
     [Fact]
+    public async Task Created_at_is_recorded_and_returned_in_whole_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds, so the response must match a later read.
+        PlaceHoldHandler handler = new(_holds, _accounts, _transactions, _unitOfWork, new FixedTimeProvider(Now.AddTicks(7)));
+
+        Result<PlaceHoldResult> result = await handler.HandleAsync(new PlaceHold(Guid.CreateVersion7(), _card.Id, 30m, "BRL"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Now, result.Value.Hold.CreatedAt);
+        Assert.Equal(Now, Assert.Single(_holds.Added).CreatedAt);
+        Assert.Equal(Now, Assert.Single(_transactions.Added).CreatedAt);
+        Assert.Equal(Now, Assert.Single(_accounts.Added).CreatedAt);
+    }
+
+    [Fact]
     public async Task Next_holds_reuse_the_holds_account_of_the_currency()
     {
         Result<PlaceHoldResult> first = await _handler.HandleAsync(new PlaceHold(Guid.CreateVersion7(), _card.Id, 30m, "BRL"));

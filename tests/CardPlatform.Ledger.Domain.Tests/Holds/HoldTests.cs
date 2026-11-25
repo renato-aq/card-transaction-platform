@@ -85,6 +85,17 @@ public class HoldTests
     }
 
     [Fact]
+    public void Placing_a_hold_truncates_its_creation_time_to_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds.
+        Result<HoldPlacement> result = Hold.Place(Guid.NewGuid(), _card, _holds, Reais(30m), Now.AddTicks(7));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Now, result.Value.Hold.CreatedAt);
+        Assert.Equal(Now, result.Value.Transaction.CreatedAt);
+    }
+
+    [Fact]
     public void Placing_a_hold_for_the_whole_card_balance_is_allowed()
     {
         PlaceHold(100m);
@@ -162,6 +173,23 @@ public class HoldTests
         Assert.Equal(Later, result.Value.CreatedAt);
         AssertTransfer(result.Value, _holds, _merchant, Reais(30m));
         AssertBalances(card: 70m, holds: 0m, merchant: 30m);
+    }
+
+    [Fact]
+    public void Capturing_and_voiding_truncate_the_completion_time_to_microseconds()
+    {
+        Hold captured = PlaceHold(30m);
+        Hold voided = PlaceHold(20m);
+
+        Result<LedgerTransaction> captureTransaction = captured.Capture(_holds, _merchant, Later.AddTicks(3));
+        Result<LedgerTransaction> voidTransaction = voided.Void(_holds, _card, Later.AddTicks(9));
+
+        Assert.True(captureTransaction.IsSuccess);
+        Assert.True(voidTransaction.IsSuccess);
+        Assert.Equal(Later, captured.CompletedAt);
+        Assert.Equal(Later, voided.CompletedAt);
+        Assert.Equal(Later, captureTransaction.Value.CreatedAt);
+        Assert.Equal(Later, voidTransaction.Value.CreatedAt);
     }
 
     [Fact]

@@ -70,6 +70,43 @@ public class CaptureAndVoidHoldHandlerTests
     }
 
     [Fact]
+    public async Task Capture_records_and_returns_the_completion_time_in_whole_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds, so the response must match a later read.
+        CaptureHoldHandler handler = new(
+            new FakeHoldRepository(_hold),
+            new FakeAccountRepository(_card, _holdsAccount, _merchant),
+            _transactions,
+            _unitOfWork,
+            new FixedTimeProvider(Later.AddTicks(7)));
+
+        Result<HoldDto> result = await handler.HandleAsync(new CaptureHold(_hold.Id, _merchant.Id));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Later, result.Value.CompletedAt);
+        Assert.Equal(Later, _hold.CompletedAt);
+        Assert.Equal(Later, Assert.Single(_transactions.Added).CreatedAt);
+    }
+
+    [Fact]
+    public async Task Void_records_and_returns_the_completion_time_in_whole_microseconds()
+    {
+        VoidHoldHandler handler = new(
+            new FakeHoldRepository(_hold),
+            new FakeAccountRepository(_card, _holdsAccount),
+            _transactions,
+            _unitOfWork,
+            new FixedTimeProvider(Later.AddTicks(7)));
+
+        Result<HoldDto> result = await handler.HandleAsync(new VoidHold(_hold.Id));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Later, result.Value.CompletedAt);
+        Assert.Equal(Later, _hold.CompletedAt);
+        Assert.Equal(Later, Assert.Single(_transactions.Added).CreatedAt);
+    }
+
+    [Fact]
     public async Task Missing_merchant_account_id_is_rejected_as_invalid()
     {
         AssertRejected(await _capture.HandleAsync(new CaptureHold(_hold.Id, null)), "invalid_account_id", ErrorType.Validation);

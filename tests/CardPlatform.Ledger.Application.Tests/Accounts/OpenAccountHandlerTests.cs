@@ -38,6 +38,18 @@ public class OpenAccountHandlerTests
         Assert.Equal(Now, saved.CreatedAt);
     }
 
+    [Fact]
+    public async Task Created_at_is_recorded_in_whole_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds.
+        OpenAccountHandler handler = new(_accounts, _unitOfWork, new FixedTimeProvider(Now.AddTicks(7)));
+
+        Result<AccountDto> result = await handler.HandleAsync(new OpenAccount("card", "BRL"));
+
+        Assert.True(result.IsSuccess);
+        Assert.Equal(Now, Assert.Single(_accounts.Added).CreatedAt);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]

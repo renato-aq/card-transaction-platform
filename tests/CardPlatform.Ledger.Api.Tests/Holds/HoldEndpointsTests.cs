@@ -17,7 +17,7 @@ namespace CardPlatform.Ledger.Api.Tests.Holds;
 /// balance of the holds account use a currency of their own, so that account (one per currency) is theirs alone.
 /// </summary>
 [Collection(LedgerApiCollectionFixture.Name)]
-public class HoldEndpointsTests(LedgerApiFactory factory)
+public partial class HoldEndpointsTests(LedgerApiFactory factory)
 {
     private readonly HoldApi _api = new(factory, factory.CreateClient());
 

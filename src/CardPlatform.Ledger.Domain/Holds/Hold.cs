@@ -30,7 +30,7 @@ public sealed class Hold
         CardAccountId = cardAccountId;
         Amount = amount;
         Status = HoldStatus.Pending;
-        CreatedAt = createdAt;
+        CreatedAt = createdAt.TruncateToMicroseconds();
         PlacementTransactionId = placementTransactionId;
     }
 
@@ -64,9 +64,13 @@ public sealed class Hold
 
     public HoldStatus Status { get; private set; }
 
+    /// <summary>When the hold was placed, in whole microseconds (see <see cref="Timestamps"/>).</summary>
     public DateTimeOffset CreatedAt { get; }
 
-    /// <summary>When the hold was captured or voided; <see langword="null"/> while it is pending.</summary>
+    /// <summary>
+    /// When the hold was captured or voided, in whole microseconds (see <see cref="Timestamps"/>);
+    /// <see langword="null"/> while it is pending.
+    /// </summary>
     public DateTimeOffset? CompletedAt { get; private set; }
 
     /// <summary>The transaction that moved the amount from the card to the holds account.</summary>
@@ -191,7 +195,7 @@ public sealed class Hold
         }
 
         Status = finalStatus;
-        CompletedAt = completedAt;
+        CompletedAt = completedAt.TruncateToMicroseconds();
         CompletionTransactionId = transaction.Value.Id;
         return transaction;
     }

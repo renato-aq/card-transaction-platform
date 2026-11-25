@@ -25,6 +25,15 @@ public class AccountTests
     }
 
     [Fact]
+    public void Open_truncates_the_creation_time_to_microseconds()
+    {
+        // A Linux clock ticks every 100 ns; PostgreSQL keeps whole microseconds.
+        Account account = Account.Open(AccountType.Card, Brl, Now.AddTicks(7));
+
+        Assert.Equal(Now, account.CreatedAt);
+    }
+
+    [Fact]
     public void Opened_account_gets_a_time_ordered_version_7_id()
     {
         Account account = Account.Open(AccountType.Card, Brl, Now);
