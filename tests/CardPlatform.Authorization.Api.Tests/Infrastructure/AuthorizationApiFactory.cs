@@ -21,8 +21,12 @@ namespace CardPlatform.Authorization.Api.Tests.Infrastructure;
 /// database, and the Authorization's <c>ledger</c> <see cref="HttpClient"/> sends its requests straight to the Ledger's
 /// test server: the calls go through the real client, resilience pipeline, HTTP contract and Ledger, without a network.
 /// </para>
+/// <para>
+/// No Kafka is started: the outbox publisher is disabled (<c>Messaging:Outbox:Enabled</c>), so the decisions stay in the
+/// outbox. <see cref="KafkaAuthorizationApiFactory"/> adds a Kafka container and enables it.
+/// </para>
 /// </summary>
-public sealed class AuthorizationApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
+public class AuthorizationApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
 {
     // Address the Ledger client resolves for https+http://ledger-api; the test server accepts any host.
     private const string LedgerAddress = "http://ledger.test";
@@ -38,7 +42,7 @@ public sealed class AuthorizationApiFactory : WebApplicationFactory<Program>, IA
     public InProcessLedgerFactory Ledger =>
         _ledger ?? throw new InvalidOperationException("The factory was not initialized.");
 
-    public async Task InitializeAsync()
+    public virtual async Task InitializeAsync()
     {
         await _postgres.StartAsync();
 
@@ -61,6 +65,19 @@ public sealed class AuthorizationApiFactory : WebApplicationFactory<Program>, IA
         }
 
         await _postgres.DisposeAsync();
+        await DisposeDependenciesAsync();
+    }
+
+    /// <summary>Disposes what a derived factory started besides PostgreSQL and the Ledger.</summary>
+    protected virtual ValueTask DisposeDependenciesAsync()
+    {
+        return ValueTask.CompletedTask;
+    }
+
+    /// <summary>Configures messaging; by default the outbox publisher is disabled, as no broker runs.</summary>
+    protected virtual void ConfigureMessaging(IWebHostBuilder builder)
+    {
+        builder.UseSetting("Messaging:Outbox:Enabled", "false");
     }
 
     /// <summary>
@@ -111,6 +128,8 @@ public sealed class AuthorizationApiFactory : WebApplicationFactory<Program>, IA
 
         // What Aspire injects for .WithReference(ledgerApi).
         builder.UseSetting("services:ledger-api:http:0", LedgerAddress);
+
+        ConfigureMessaging(builder);
 
         // Generous timeouts: the in-process Ledger may be slow on its first (cold) requests. The production timeouts are
         // covered by the Ledger client tests.
