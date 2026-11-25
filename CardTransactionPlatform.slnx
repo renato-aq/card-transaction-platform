@@ -2,6 +2,9 @@
   <Folder Name="/src/">
     <Project Path="src/CardPlatform.AppHost/CardPlatform.AppHost.csproj" />
     <Project Path="src/CardPlatform.Authorization.Api/CardPlatform.Authorization.Api.csproj" />
+    <Project Path="src/CardPlatform.Authorization.Application/CardPlatform.Authorization.Application.csproj" />
+    <Project Path="src/CardPlatform.Authorization.Domain/CardPlatform.Authorization.Domain.csproj" />
+    <Project Path="src/CardPlatform.Authorization.Infrastructure/CardPlatform.Authorization.Infrastructure.csproj" />
     <Project Path="src/CardPlatform.Contracts/CardPlatform.Contracts.csproj" />
     <Project Path="src/CardPlatform.Fraud.Worker/CardPlatform.Fraud.Worker.csproj" />
     <Project Path="src/CardPlatform.Ledger.Api/CardPlatform.Ledger.Api.csproj" />
@@ -14,6 +17,8 @@
   <Folder Name="/tests/">
     <Project Path="tests/CardPlatform.Architecture.Tests/CardPlatform.Architecture.Tests.csproj" />
     <Project Path="tests/CardPlatform.Authorization.Api.Tests/CardPlatform.Authorization.Api.Tests.csproj" />
+    <Project Path="tests/CardPlatform.Authorization.Application.Tests/CardPlatform.Authorization.Application.Tests.csproj" />
+    <Project Path="tests/CardPlatform.Authorization.Domain.Tests/CardPlatform.Authorization.Domain.Tests.csproj" />
     <Project Path="tests/CardPlatform.Ledger.Api.Tests/CardPlatform.Ledger.Api.Tests.csproj" />
     <Project Path="tests/CardPlatform.Ledger.Application.Tests/CardPlatform.Ledger.Application.Tests.csproj" />
     <Project Path="tests/CardPlatform.Ledger.Domain.Tests/CardPlatform.Ledger.Domain.Tests.csproj" />

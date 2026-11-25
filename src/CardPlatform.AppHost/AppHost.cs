@@ -4,6 +4,7 @@ var postgres = builder.AddPostgres("postgres")
     .WithDataVolume();
 
 var ledgerDb = postgres.AddDatabase("ledgerdb");
+var authorizationDb = postgres.AddDatabase("authorizationdb");
 
 var kafka = builder.AddKafka("kafka")
     .WithKafkaUI();
@@ -15,6 +16,8 @@ var ledgerApi = builder.AddDotnetProject("ledger-api", "../CardPlatform.Ledger.A
     .WaitFor(kafka);
 
 builder.AddDotnetProject("authorization-api", "../CardPlatform.Authorization.Api")
+    .WithReference(authorizationDb)
+    .WaitFor(authorizationDb)
     .WithReference(ledgerApi)
     .WaitFor(ledgerApi)
     .WithReference(kafka)
