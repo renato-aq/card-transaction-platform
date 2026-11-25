@@ -1,5 +1,9 @@
 <Project>
   <PropertyGroup>
+    <Version>0.2.0</Version>
+  </PropertyGroup>
+
+  <PropertyGroup>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisLevel>latest-recommended</AnalysisLevel>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
