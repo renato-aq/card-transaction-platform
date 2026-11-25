@@ -32,8 +32,8 @@ the merchant) or **voided** (the money goes back to the card) later; see [Author
 | **Fraud Worker** | Consumes transaction events and flags suspicious patterns |
 | **Settlement Job** | Generates the daily settlement file in batches from the ledger |
 
-Shared projects: `ServiceDefaults` (OpenTelemetry, health checks, resilience, service discovery) and
-`Contracts` (integration events).
+Shared projects: `ServiceDefaults` (OpenTelemetry, health checks, resilience, service discovery), `Contracts`
+(integration events) and `Messaging` (transactional outbox, used by the services' Infrastructure layers).
 
 ## Tech stack
 
@@ -422,9 +422,10 @@ src/
   CardPlatform.AppHost/               Aspire orchestration
   CardPlatform.ServiceDefaults/       Shared observability, health checks, resilience
   CardPlatform.Contracts/             Integration events
+  CardPlatform.Messaging/             Transactional outbox table (outbox_messages), shared by the services
   CardPlatform.Authorization.Domain/         Authorization entities and invariants
   CardPlatform.Authorization.Application/    Authorization use cases and ports
-  CardPlatform.Authorization.Infrastructure/ EF Core, PostgreSQL (authorizationdb), migrations, Ledger HTTP client
+  CardPlatform.Authorization.Infrastructure/ EF Core, PostgreSQL (authorizationdb), migrations, outbox, Ledger HTTP client
   CardPlatform.Authorization.Api/            Authorization HTTP endpoints
   CardPlatform.Ledger.Domain/         Ledger entities, value objects and invariants
   CardPlatform.Ledger.Application/    Ledger use cases (command/query handlers) and ports
