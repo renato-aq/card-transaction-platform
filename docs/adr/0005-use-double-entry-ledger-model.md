@@ -58,3 +58,9 @@ the money held on behalf of cardholders and merchants.
 - Reading "available balance" with the `credits − debits` convention is natural for cards but means the
   platform-side accounts usually show negative balances.
 - Holds (reservations) and credit limits are not modelled yet and will need their own decision.
+
+## Amendment (2026-11-25)
+
+Holds are now modelled, by ADR 0007: a fourth account type, **`Holds`** (one per currency, any balance), and a `Hold`
+entity whose placement, capture and void are ordinary balanced transactions through that account, so the invariants
+and the sign convention above apply unchanged. Credit limits are still not modelled.

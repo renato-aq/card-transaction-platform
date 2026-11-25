@@ -49,3 +49,20 @@ transactions.
   conflicts as volume grows. If that becomes a problem, alternatives are pessimistic locking for those accounts,
   queueing writes per account, or not updating platform-side balances synchronously; that needs its own decision.
 - Other commands do not retry on conflicts yet; each must opt in to the decorator explicitly.
+
+## Amendment (2026-11-25)
+
+Holds (ADR 0007) extended this decision; the original text above is kept as it was written.
+
+- **Holds use the same token.** `holds` maps `xmin` as a shadow `uint` row version, like `accounts`, so two requests
+  cannot both capture or void the same hold: the second save fails with a concurrency conflict.
+- **Concurrent inserts are conflicts too.** Besides `DbUpdateConcurrencyException`, `LedgerDbContext` translates a
+  PostgreSQL unique violation (`23505`) on `pk_holds` or `ux_accounts_holds_currency` into
+  `ConcurrencyConflictException`. Two requests placing the same hold id, or opening the holds account of the same
+  currency on first use, both pass the "does it exist?" check; the loser's insert fails, the decorator discards its
+  changes and runs the handler again, which now finds the row just created (an existing hold is returned as it is, an
+  existing holds account is reused). Other unique violations are unexpected and propagate unchanged.
+- **Commands that retry.** `RetryOnConcurrencyConflictDecorator` wraps `PostTransaction`, `PlaceHold`, `CaptureHold`
+  and `VoidHold` (`AddLedgerApplication`), with the limits and backoff described above; `OpenAccount` does not retry.
+  A retried capture or void reloads the hold, so if the competing request completed it the retry returns
+  `hold_not_pending` instead of a conflict.
