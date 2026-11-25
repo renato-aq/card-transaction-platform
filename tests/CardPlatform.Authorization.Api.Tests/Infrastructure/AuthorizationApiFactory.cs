@@ -87,6 +87,18 @@ public sealed class AuthorizationApiFactory : WebApplicationFactory<Program>, IA
                     new LostReplyLedgerHandler(Ledger.Server.CreateHandler(), losesReply))));
     }
 
+    /// <summary>
+    /// A copy of this API, sharing the same database, whose Ledger client runs <paramref name="beforeSend"/> before each
+    /// request reaches the Ledger.
+    /// </summary>
+    public WebApplicationFactory<Program> WithBeforeLedgerRequest(Func<HttpRequestMessage, Task> beforeSend)
+    {
+        return WithWebHostBuilder(builder => builder.ConfigureTestServices(services =>
+            services.AddHttpClient(DependencyInjection.LedgerHttpClientName)
+                .ConfigurePrimaryHttpMessageHandler(() =>
+                    new InterceptingLedgerHandler(Ledger.Server.CreateHandler(), beforeSend))));
+    }
+
     /// <summary>A copy of this API, sharing the same database, that reads the time from <paramref name="clock"/>.</summary>
     public WebApplicationFactory<Program> WithClock(TimeProvider clock)
     {
