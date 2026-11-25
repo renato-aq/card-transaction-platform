@@ -5,11 +5,17 @@
     <Project Path="src/CardPlatform.Contracts/CardPlatform.Contracts.csproj" />
     <Project Path="src/CardPlatform.Fraud.Worker/CardPlatform.Fraud.Worker.csproj" />
     <Project Path="src/CardPlatform.Ledger.Api/CardPlatform.Ledger.Api.csproj" />
+    <Project Path="src/CardPlatform.Ledger.Application/CardPlatform.Ledger.Application.csproj" />
+    <Project Path="src/CardPlatform.Ledger.Domain/CardPlatform.Ledger.Domain.csproj" />
+    <Project Path="src/CardPlatform.Ledger.Infrastructure/CardPlatform.Ledger.Infrastructure.csproj" />
     <Project Path="src/CardPlatform.ServiceDefaults/CardPlatform.ServiceDefaults.csproj" />
     <Project Path="src/CardPlatform.Settlement.Job/CardPlatform.Settlement.Job.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/CardPlatform.Architecture.Tests/CardPlatform.Architecture.Tests.csproj" />
     <Project Path="tests/CardPlatform.Authorization.Api.Tests/CardPlatform.Authorization.Api.Tests.csproj" />
     <Project Path="tests/CardPlatform.Ledger.Api.Tests/CardPlatform.Ledger.Api.Tests.csproj" />
+    <Project Path="tests/CardPlatform.Ledger.Application.Tests/CardPlatform.Ledger.Application.Tests.csproj" />
+    <Project Path="tests/CardPlatform.Ledger.Domain.Tests/CardPlatform.Ledger.Domain.Tests.csproj" />
   </Folder>
 </Solution>
