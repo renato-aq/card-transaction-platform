@@ -11,12 +11,17 @@ internal sealed class CardAuthorizationConfiguration : IEntityTypeConfiguration<
     /// <summary>Maximum length of a stored <see cref="DeclineReason"/> name.</summary>
     public const int DeclineReasonMaxLength = 30;
 
+    /// <summary>
+    /// Primary key of <c>authorizations</c>; two requests with the same idempotency key (same reserved id) violate it.
+    /// </summary>
+    public const string PrimaryKeyName = "pk_authorizations";
+
     public void Configure(EntityTypeBuilder<CardAuthorization> builder)
     {
         builder.ToTable("authorizations");
 
         // The id is chosen by the Application before the Ledger is called (it is also the hold id), never generated.
-        builder.HasKey(authorization => authorization.Id);
+        builder.HasKey(authorization => authorization.Id).HasName(PrimaryKeyName);
         builder.Property(authorization => authorization.Id).ValueGeneratedNever();
 
         builder.HasOne<Card>()

@@ -110,6 +110,55 @@ namespace CardPlatform.Authorization.Infrastructure.Persistence.Migrations
                     b.ToTable("cards", (string)null);
                 });
 
+            modelBuilder.Entity("CardPlatform.Authorization.Infrastructure.Persistence.Idempotency.IdempotencyKeyRecord", b =>
+                {
+                    b.Property<string>("Key")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("key");
+
+                    b.Property<Guid>("AuthorizationId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("authorization_id");
+
+                    b.Property<Guid?>("ClaimToken")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid")
+                        .HasColumnName("claim_token");
+
+                    b.Property<DateTimeOffset?>("CompletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("completed_at");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("LockedUntil")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("locked_until");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character(64)")
+                        .HasColumnName("request_hash")
+                        .IsFixedLength();
+
+                    b.Property<string>("ResponseBody")
+                        .HasColumnType("text")
+                        .HasColumnName("response_body");
+
+                    b.Property<int?>("ResponseStatusCode")
+                        .HasColumnType("integer")
+                        .HasColumnName("response_status_code");
+
+                    b.HasKey("Key")
+                        .HasName("pk_idempotency_keys");
+
+                    b.ToTable("idempotency_keys", (string)null);
+                });
+
             modelBuilder.Entity("CardPlatform.Authorization.Domain.Authorizations.CardAuthorization", b =>
                 {
                     b.HasOne("CardPlatform.Authorization.Domain.Cards.Card", null)
