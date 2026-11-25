@@ -22,6 +22,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CardPlatform.Authorization.Api\CardPlatform.Authorization.Api.csproj" />
+    <!-- The Ledger runs in process for the card tests; both APIs declare a global Program, so the Ledger's is aliased. -->
+    <ProjectReference Include="..\..\src\CardPlatform.Ledger.Api\CardPlatform.Ledger.Api.csproj" Aliases="LedgerApi" />
   </ItemGroup>
 
 </Project>
