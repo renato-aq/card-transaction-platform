@@ -15,7 +15,7 @@ flowchart LR
     auth --> authdb[(authorizationdb)]
     auth -->|"2. place hold<br/>4. capture or void hold"| ledger[Ledger API]
     ledger --> ledgerdb[(ledgerdb)]
-    ledger -.->|outbox| kafka{{Kafka}}
+    auth -->|"decisions (outbox)"| kafka{{Kafka}}
     kafka -.-> fraud[Fraud Worker]
     ledgerdb -.-> settlement[Settlement Job]
     settlement -.-> file[/Daily settlement file/]
@@ -33,7 +33,8 @@ the merchant) or **voided** (the money goes back to the card) later; see [Author
 | **Settlement Job** | Generates the daily settlement file in batches from the ledger |
 
 Shared projects: `ServiceDefaults` (OpenTelemetry, health checks, resilience, service discovery), `Contracts`
-(integration events) and `Messaging` (transactional outbox, used by the services' Infrastructure layers).
+(integration events) and `Messaging` (transactional outbox and its Kafka publisher, used by the services' Infrastructure
+layers).
 
 ## Tech stack
 
@@ -67,7 +68,7 @@ The Aspire dashboard URL is printed in the console. Kafka UI is available from t
 
 Run the tests (the Ledger and Authorization API integration tests use [Testcontainers](https://testcontainers.com/) to start a
 real PostgreSQL, so the container runtime must be running; the Authorization integration tests also run the real Ledger
-API in process, with its own database):
+API in process, with its own database, and the outbox publisher tests also start a Kafka broker):
 
 ```bash
 dotnet test
@@ -217,7 +218,7 @@ as the Ledger ([ADR 0004](docs/adr/0004-use-hexagonal-architecture-with-pragmati
 |---|---|---|
 | `Authorization.Domain` | `Card`, `CardAuthorization`, decline reasons, `Money` and the invariants | nothing |
 | `Authorization.Application` | Command/query handlers, idempotency rules, ports (repositories, idempotency key store, `ILedgerClient`) | Domain |
-| `Authorization.Infrastructure` | EF Core + PostgreSQL adapters, migrations, Ledger HTTP client | Application |
+| `Authorization.Infrastructure` | EF Core + PostgreSQL adapters, migrations, outbox, Ledger HTTP client | Application |
 | `Authorization.Api` | Minimal API endpoints, `Idempotency-Key` header, `Result` → `ProblemDetails`, composition root | Application, Infrastructure |
 
 ```mermaid
@@ -255,6 +256,12 @@ sequenceDiagram
   if the hold was completed the same way, the authorization is marked so and the call succeeds; if it was completed the
   other way, the authorization takes that status and the call is `422`. Retrying a capture or void is therefore safe
   without an idempotency key.
+- **Events** ([ADR 0010](docs/adr/0010-publish-integration-events-through-a-transactional-outbox.md)): every decision
+  (approved, declined, captured, voided) is written to the `outbox_messages` table in the same transaction as the
+  authorization, and a background publisher sends it to the Kafka topic `authorizations`, keyed by card id, marking
+  it published only after the broker acknowledged it. If Kafka is down, events wait in the outbox and are published,
+  in order per card, when it is back. Delivery is at least once, so consumers deduplicate by event id. In Development
+  the topics are created on startup (3 partitions each); `Messaging:Outbox:Enabled=false` turns publishing off.
 
 ### When the Ledger is down
 
@@ -422,7 +429,7 @@ src/
   CardPlatform.AppHost/               Aspire orchestration
   CardPlatform.ServiceDefaults/       Shared observability, health checks, resilience
   CardPlatform.Contracts/             Integration events
-  CardPlatform.Messaging/             Transactional outbox table (outbox_messages), shared by the services
+  CardPlatform.Messaging/             Transactional outbox (outbox_messages) and its Kafka publisher, shared by the services
   CardPlatform.Authorization.Domain/         Authorization entities and invariants
   CardPlatform.Authorization.Application/    Authorization use cases and ports
   CardPlatform.Authorization.Infrastructure/ EF Core, PostgreSQL (authorizationdb), migrations, outbox, Ledger HTTP client
@@ -442,6 +449,7 @@ tests/
   CardPlatform.Authorization.Application.Tests/
   CardPlatform.Authorization.Infrastructure.Tests/ Ledger client against a fake Ledger (retries, timeouts, circuit)
   CardPlatform.Authorization.Api.Tests/ Integration tests (WebApplicationFactory + Testcontainers PostgreSQL, Ledger API in process)
+  CardPlatform.Messaging.Tests/       Outbox publisher against Testcontainers PostgreSQL and Kafka
 docs/adr/                             Architecture Decision Records
 ```
 
@@ -470,3 +478,4 @@ See [docs/adr](docs/adr) for the reasoning behind the main technical choices:
 7. [Model authorization holds in the ledger](docs/adr/0007-model-authorization-holds-in-the-ledger.md)
 8. [Make purchase authorization idempotent](docs/adr/0008-make-purchase-authorization-idempotent.md)
 9. [Fail fast when the Ledger is unavailable](docs/adr/0009-fail-fast-when-the-ledger-is-unavailable.md)
+10. [Publish integration events through a transactional outbox](docs/adr/0010-publish-integration-events-through-a-transactional-outbox.md)
