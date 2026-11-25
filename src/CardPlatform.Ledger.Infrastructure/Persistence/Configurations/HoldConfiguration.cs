@@ -9,12 +9,15 @@ namespace CardPlatform.Ledger.Infrastructure.Persistence.Configurations;
 
 internal sealed class HoldConfiguration : IEntityTypeConfiguration<Hold>
 {
+    /// <summary>Primary key of <c>holds</c>; inserting an existing hold id violates it.</summary>
+    public const string PrimaryKeyName = "pk_holds";
+
     public void Configure(EntityTypeBuilder<Hold> builder)
     {
         builder.ToTable("holds");
 
         // The id is given by the creator (the authorization id), never generated.
-        builder.HasKey(hold => hold.Id);
+        builder.HasKey(hold => hold.Id).HasName(PrimaryKeyName);
         builder.Property(hold => hold.Id).ValueGeneratedNever();
 
         builder.ComplexProperty(hold => hold.Amount, amount =>

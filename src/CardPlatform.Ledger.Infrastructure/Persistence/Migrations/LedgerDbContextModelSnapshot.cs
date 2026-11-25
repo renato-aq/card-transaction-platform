@@ -69,6 +69,11 @@ namespace CardPlatform.Ledger.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_accounts");
 
+                    b.HasIndex("Currency")
+                        .IsUnique()
+                        .HasDatabaseName("ux_accounts_holds_currency")
+                        .HasFilter("type = 'Holds'");
+
                     b.ToTable("accounts", (string)null);
                 });
 

@@ -2,6 +2,7 @@ using CardPlatform.Ledger.Application.Abstractions.Persistence;
 using CardPlatform.Ledger.Application.Accounts;
 using CardPlatform.Ledger.Domain.Accounts;
 using CardPlatform.Ledger.Domain.Common;
+using CardPlatform.Ledger.Domain.Monetary;
 
 namespace CardPlatform.Ledger.Application.Tests.Accounts;
 
@@ -86,6 +87,11 @@ public class OpenAccountHandlerTests
             CancellationToken cancellationToken = default)
         {
             return Task.FromResult<IReadOnlyList<Account>>(Added.FindAll(account => ids.Contains(account.Id)));
+        }
+
+        public Task<Account?> GetHoldsAccountAsync(Currency currency, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Opening an account must not look up holds accounts.");
         }
 
         public void Add(Account account)

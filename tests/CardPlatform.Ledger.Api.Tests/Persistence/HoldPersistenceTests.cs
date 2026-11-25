@@ -17,20 +17,22 @@ public class HoldPersistenceTests(LedgerApiFactory factory)
 
     private static readonly DateTimeOffset CapturedAt = CreatedAt.AddMinutes(5);
 
-    private static readonly Currency Brl = Currency.Create("BRL").Value;
+    // A currency no other test uses: there is one holds account per currency (unique index), and this test opens its
+    // own outside the API, so it must not collide with the one the hold endpoints create on first use.
+    private static readonly Currency Xts = Currency.Create("XTS").Value;
 
     [Fact]
     public async Task Saved_hold_is_read_back_with_the_same_values_and_state()
     {
-        Account settlement = Account.Open(AccountType.Settlement, Brl, CreatedAt);
-        Account card = Account.Open(AccountType.Card, Brl, CreatedAt);
-        Account holds = Account.Open(AccountType.Holds, Brl, CreatedAt);
-        Account merchant = Account.Open(AccountType.Merchant, Brl, CreatedAt);
+        Account settlement = Account.Open(AccountType.Settlement, Xts, CreatedAt);
+        Account card = Account.Open(AccountType.Card, Xts, CreatedAt);
+        Account holds = Account.Open(AccountType.Holds, Xts, CreatedAt);
+        Account merchant = Account.Open(AccountType.Merchant, Xts, CreatedAt);
         LedgerTransaction topUp = LedgerTransaction.Create(
-            [Entry.Debit(settlement.Id, Reais(100m)), Entry.Credit(card.Id, Reais(100m))],
+            [Entry.Debit(settlement.Id, InXts(100m)), Entry.Credit(card.Id, InXts(100m))],
             CreatedAt).Value;
         Assert.True(topUp.ApplyTo([settlement, card]).IsSuccess);
-        HoldPlacement placement = Hold.Place(Guid.CreateVersion7(), card, holds, Reais(30.25m), CreatedAt).Value;
+        HoldPlacement placement = Hold.Place(Guid.CreateVersion7(), card, holds, InXts(30.25m), CreatedAt).Value;
         Hold hold = placement.Hold;
 
         await using (AsyncServiceScope scope = factory.Services.CreateAsyncScope())
@@ -82,9 +84,9 @@ public class HoldPersistenceTests(LedgerApiFactory factory)
             Assert.NotNull(loaded.CompletionTransactionId);
             Assert.NotNull(await scope.ServiceProvider.GetRequiredService<ILedgerTransactionRepository>()
                 .GetByIdAsync(loaded.CompletionTransactionId.Value));
-            Assert.Equal(Reais(69.75m), (await accounts.GetByIdAsync(card.Id))!.Balance);
-            Assert.Equal(Money.Zero(Brl), (await accounts.GetByIdAsync(holds.Id))!.Balance);
-            Assert.Equal(Reais(30.25m), (await accounts.GetByIdAsync(merchant.Id))!.Balance);
+            Assert.Equal(InXts(69.75m), (await accounts.GetByIdAsync(card.Id))!.Balance);
+            Assert.Equal(Money.Zero(Xts), (await accounts.GetByIdAsync(holds.Id))!.Balance);
+            Assert.Equal(InXts(30.25m), (await accounts.GetByIdAsync(merchant.Id))!.Balance);
         }
     }
 
@@ -96,9 +98,9 @@ public class HoldPersistenceTests(LedgerApiFactory factory)
         Assert.Null(await scope.ServiceProvider.GetRequiredService<IHoldRepository>().GetByIdAsync(Guid.CreateVersion7()));
     }
 
-    private static Money Reais(decimal amount)
+    private static Money InXts(decimal amount)
     {
-        return Money.Create(amount, Brl).Value;
+        return Money.Create(amount, Xts).Value;
     }
 
     private static void AssertSameHold(Hold expected, Hold actual)

@@ -230,6 +230,11 @@ public class PostTransactionHandlerTests
             return Task.FromResult<IReadOnlyList<Account>>(Array.FindAll(existing, account => ids.Contains(account.Id)));
         }
 
+        public Task<Account?> GetHoldsAccountAsync(Currency currency, CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("Posting a transaction must not look up holds accounts.");
+        }
+
         public void Add(Account account)
         {
             throw new InvalidOperationException("Posting a transaction must not add accounts.");
