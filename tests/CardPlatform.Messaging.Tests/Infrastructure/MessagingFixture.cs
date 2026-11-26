@@ -65,13 +65,19 @@ public sealed class MessagingFixture : IAsyncLifetime
         await dbContext.Database.ExecuteSqlRawAsync("TRUNCATE outbox_messages, processed_messages RESTART IDENTITY");
     }
 
-    /// <summary>Creates a new topic with a unique name and <paramref name="partitions"/> partitions.</summary>
+    /// <summary>
+    /// Creates a new topic with a unique name and <paramref name="partitions"/> partitions, and its dead-letter topic
+    /// (<c>&lt;topic&gt;.dlt</c>, one partition).
+    /// </summary>
     public async Task<string> CreateTopicAsync(int partitions = 3)
     {
         string topic = "test-" + Guid.NewGuid().ToString("N");
         using IAdminClient admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = BootstrapServers }).Build();
         await admin.CreateTopicsAsync(
-            [new TopicSpecification { Name = topic, NumPartitions = partitions, ReplicationFactor = 1 }]);
+        [
+            new TopicSpecification { Name = topic, NumPartitions = partitions, ReplicationFactor = 1 },
+            new TopicSpecification { Name = Topics.DeadLetterOf(topic), NumPartitions = 1, ReplicationFactor = 1 },
+        ]);
         return topic;
     }
 
@@ -103,13 +109,15 @@ public sealed class MessagingFixture : IAsyncLifetime
     /// <summary>
     /// A host (not started) with the integration event consumer registered as a service would register it, for
     /// <see cref="TestOutboxDbContext"/>, consuming <paramref name="topic"/> in <paramref name="groupId"/> with short retry
-    /// delays, and <see cref="RecordingApprovedHandler"/> as the handler of <see cref="AuthorizationApproved"/>.
+    /// delays, and <see cref="RecordingApprovedHandler"/> as the handler of <see cref="AuthorizationApproved"/>, plus
+    /// any other <paramref name="settings"/> (e.g. <c>Messaging:Consumer:MaxAttempts</c>).
     /// </summary>
     public IHost CreateConsumerHost(
         string topic,
         string groupId,
         Action<IServiceCollection>? configureServices = null,
-        LogCapture? logs = null)
+        LogCapture? logs = null,
+        IReadOnlyDictionary<string, string?>? settings = null)
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder(
             new HostApplicationBuilderSettings { DisableDefaults = true, EnvironmentName = Environments.Production });
@@ -120,6 +128,10 @@ public sealed class MessagingFixture : IAsyncLifetime
             ["Messaging:Consumer:RetryInitialDelay"] = "00:00:00.100",
             ["Messaging:Consumer:RetryMaxDelay"] = "00:00:00.500",
         });
+        if (settings is not null)
+        {
+            builder.Configuration.AddInMemoryCollection(settings);
+        }
 
         builder.Services.AddDbContext<TestOutboxDbContext>(options => TestOutboxDbContext.Configure(options, ConnectionString));
         if (logs is not null)
@@ -154,11 +166,24 @@ public sealed class MessagingFixture : IAsyncLifetime
     }
 
     /// <summary>Sends <paramref name="value"/> to <paramref name="topic"/> with key <paramref name="key"/> and waits for the acknowledgement.</summary>
-    public async Task ProduceAsync(string topic, string key, byte[] value)
+    public async Task<TopicPartitionOffset> ProduceAsync(string topic, string key, byte[] value, Headers? headers = null)
     {
         using IProducer<string, byte[]> producer =
             new ProducerBuilder<string, byte[]>(new ProducerConfig { BootstrapServers = BootstrapServers }).Build();
-        await producer.ProduceAsync(topic, new Message<string, byte[]> { Key = key, Value = value });
+        DeliveryResult<string, byte[]> delivered =
+            await producer.ProduceAsync(topic, new Message<string, byte[]> { Key = key, Value = value, Headers = headers });
+        return delivered.TopicPartitionOffset;
+    }
+
+    /// <summary>Sends <paramref name="value"/> to partition <paramref name="partition"/> of <paramref name="topic"/>.</summary>
+    public async Task<TopicPartitionOffset> ProduceAsync(string topic, int partition, string key, byte[] value)
+    {
+        using IProducer<string, byte[]> producer =
+            new ProducerBuilder<string, byte[]>(new ProducerConfig { BootstrapServers = BootstrapServers }).Build();
+        DeliveryResult<string, byte[]> delivered = await producer.ProduceAsync(
+            new TopicPartition(topic, partition),
+            new Message<string, byte[]> { Key = key, Value = value });
+        return delivered.TopicPartitionOffset;
     }
 
     /// <summary>The offset committed by <paramref name="groupId"/> on each partition of <paramref name="topic"/> (-1001 when none).</summary>

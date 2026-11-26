@@ -5,6 +5,8 @@ using CardPlatform.Messaging.Consuming;
 using CardPlatform.Messaging.Kafka;
 using CardPlatform.Messaging.Publishing;
 
+using Confluent.Kafka;
+
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -53,19 +55,7 @@ public static class MessagingHostingExtensions
             .Validate(static options => options.IsValid(), "Invalid outbox publisher settings (Messaging:Outbox).")
             .ValidateOnStart();
 
-        // Readiness must not depend on Kafka: an outage only delays events, which wait in the outbox (ADR 0010). The
-        // Aspire health check stays available by setting Aspire:Confluent:Kafka:Producer:DisableHealthChecks to false.
-        bool healthCheckConfigured =
-            builder.Configuration[$"{KafkaProducerSettingsSection}:{nameof(KafkaProducerSettings.DisableHealthChecks)}"] is not null;
-
-        builder.AddKafkaProducer<string, byte[]>(connectionName, settings =>
-        {
-            KafkaProducerDefaults.Apply(settings.Config);
-            if (!healthCheckConfigured)
-            {
-                settings.DisableHealthChecks = true;
-            }
-        });
+        AddKafkaProducerOnce(builder, connectionName);
 
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.TryAddSingleton<IOutboxMessageProducer, KafkaOutboxMessageProducer>();
@@ -85,8 +75,12 @@ public static class MessagingHostingExtensions
     /// <paramref name="connectionName"/>, telemetry; its health check is off unless configured), in consumer group
     /// <paramref name="groupId"/> unless <c>Aspire:Confluent:Kafka:Consumer:Config:GroupId</c> says otherwise, without
     /// automatic commits and, for a new group, from the earliest offset (<see cref="KafkaConsumerDefaults"/>). One
-    /// consumer per host. When <c>Messaging:Consumer:Enabled</c> is <see langword="false"/> nothing is registered and the
-    /// events wait in Kafka. The context's database must be PostgreSQL.
+    /// consumer per host. A message that fails with a temporary error is retried with backoff up to
+    /// <c>Messaging:Consumer:MaxAttempts</c> times; one that keeps failing, or fails permanently, is sent to
+    /// <c>&lt;topic&gt;.dlt</c> (<see cref="KafkaDeadLetterProducer"/>) through the Kafka producer of the Aspire
+    /// integration, registered here too unless <see cref="AddOutboxPublisher{TDbContext}"/> already did. When
+    /// <c>Messaging:Consumer:Enabled</c> is <see langword="false"/> nothing is registered and the events wait in Kafka. The
+    /// context's database must be PostgreSQL.
     /// </summary>
     public static IHostApplicationBuilder AddIntegrationEventConsumer<TDbContext>(
         this IHostApplicationBuilder builder,
@@ -127,16 +121,26 @@ public static class MessagingHostingExtensions
         bool healthCheckConfigured =
             builder.Configuration[$"{KafkaConsumerSettingsSection}:{nameof(KafkaConsumerSettings.DisableHealthChecks)}"] is not null;
 
+        // The group actually used (the configured one wins over groupId), for the dead-letter headers.
+        string effectiveGroupId = groupId;
         builder.AddKafkaConsumer<string, byte[]>(connectionName, settings =>
         {
             KafkaConsumerDefaults.Apply(settings.Config, groupId);
+            effectiveGroupId = settings.Config.GroupId;
             if (!healthCheckConfigured)
             {
                 settings.DisableHealthChecks = true;
             }
         });
 
+        // Messages that cannot be processed go to <topic>.dlt, also when the service does not publish an outbox.
+        AddKafkaProducerOnce(builder, connectionName);
+
         builder.Services.TryAddSingleton(TimeProvider.System);
+        builder.Services.TryAddSingleton(serviceProvider => new KafkaDeadLetterProducer(
+            serviceProvider.GetRequiredService<IProducer<string, byte[]>>(),
+            effectiveGroupId,
+            serviceProvider.GetRequiredService<TimeProvider>()));
         builder.Services.TryAddSingleton<IntegrationEventProcessor<TDbContext>>();
         builder.Services.AddHostedService<IntegrationEventConsumer<TDbContext>>();
 
@@ -186,5 +190,34 @@ public static class MessagingHostingExtensions
             serviceProvider.GetRequiredService<ILogger<KafkaTopicInitializer>>()));
 
         return builder;
+    }
+
+    /// <summary>
+    /// Registers the Kafka producer through the Aspire integration (connection string <paramref name="connectionName"/>,
+    /// telemetry; its health check is off unless configured), idempotent with <c>acks=all</c>
+    /// (<see cref="KafkaProducerDefaults"/>), unless a producer is registered already: the outbox publisher and the
+    /// consumer's dead-letter topic share one.
+    /// </summary>
+    private static void AddKafkaProducerOnce(IHostApplicationBuilder builder, string connectionName)
+    {
+        if (builder.Services.Any(static descriptor => descriptor.ServiceType == typeof(IProducer<string, byte[]>)))
+        {
+            return;
+        }
+
+        // Readiness must not depend on Kafka: an outage only delays events, which wait in the outbox (ADR 0010) or in
+        // Kafka (ADR 0011). The Aspire health check stays available by setting
+        // Aspire:Confluent:Kafka:Producer:DisableHealthChecks to false.
+        bool healthCheckConfigured =
+            builder.Configuration[$"{KafkaProducerSettingsSection}:{nameof(KafkaProducerSettings.DisableHealthChecks)}"] is not null;
+
+        builder.AddKafkaProducer<string, byte[]>(connectionName, settings =>
+        {
+            KafkaProducerDefaults.Apply(settings.Config);
+            if (!healthCheckConfigured)
+            {
+                settings.DisableHealthChecks = true;
+            }
+        });
     }
 }

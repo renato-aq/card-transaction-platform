@@ -57,7 +57,11 @@ public sealed class IntegrationEventConsumerTests(MessagingFixture fixture) : IA
         await fixture.ProduceAsync(topic, key, EventSerializer.SerializeToUtf8Bytes(failing));
         await fixture.ProduceAsync(topic, key, EventSerializer.SerializeToUtf8Bytes(next));
 
-        using IHost host = fixture.CreateConsumerHost(topic, groupId);
+        // Three failures stay within the limit of four attempts, so the message is retried and never dead-lettered.
+        using IHost host = fixture.CreateConsumerHost(
+            topic,
+            groupId,
+            settings: new Dictionary<string, string?> { ["Messaging:Consumer:MaxAttempts"] = "4" });
         HandlerProbe probe = host.Services.GetRequiredService<HandlerProbe>();
         int failures = 0;
         probe.OnHandle = envelope =>
@@ -71,6 +75,7 @@ public sealed class IntegrationEventConsumerTests(MessagingFixture fixture) : IA
 
         Assert.Equal([failing.EventId, failing.EventId, failing.EventId, failing.EventId, next.EventId], probe.Calls);
         Assert.Equal(2, Assert.Single(fixture.CommittedOffsets(groupId, topic)).Value);
+        Assert.Equal(0, fixture.CountMessages(Topics.DeadLetterOf(topic)));
     }
 
     [Fact]

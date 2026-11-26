@@ -21,6 +21,13 @@ public sealed class IntegrationEventConsumerOptions
     /// </summary>
     public IList<string> Topics { get; } = [];
 
+    /// <summary>
+    /// How many times a message that fails with a temporary error (e.g. the database is down) is processed before it is
+    /// sent to its dead-letter topic (<c>&lt;topic&gt;.dlt</c>), the first attempt included. A permanent error (a malformed
+    /// message, <see cref="IntegrationEventRejectedException"/>) sends it there after the first. Default 5.
+    /// </summary>
+    public int MaxAttempts { get; set; } = 5;
+
     /// <summary>Wait before the first retry of a message that failed; doubled after each further failure. Default 1 s.</summary>
     public TimeSpan RetryInitialDelay { get; set; } = TimeSpan.FromSeconds(1);
 
@@ -39,6 +46,7 @@ public sealed class IntegrationEventConsumerOptions
     {
         return Topics.Count > 0
             && Topics.All(static topic => !string.IsNullOrWhiteSpace(topic))
+            && MaxAttempts >= 1
             && RetryInitialDelay > TimeSpan.Zero
             && RetryMaxDelay >= RetryInitialDelay;
     }

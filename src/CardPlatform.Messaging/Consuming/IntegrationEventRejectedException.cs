@@ -5,8 +5,9 @@ namespace CardPlatform.Messaging.Consuming;
 /// data breaks a rule of the consuming service), as opposed to a failure that may pass (e.g. the database is down).
 /// </summary>
 /// <remarks>
-/// For now the consumer retries it like any other failure, so the event is never lost (ADR 0011); routing such events
-/// to a dead-letter topic instead is a later change.
+/// The consumer does not retry it: the message goes to its dead-letter topic (<c>&lt;topic&gt;.dlt</c>) after this first
+/// attempt, with the exception's message as the reason, and the partition moves on (ADR 0011). Any other exception is
+/// treated as temporary and retried up to <see cref="IntegrationEventConsumerOptions.MaxAttempts"/> times first.
 /// </remarks>
 public sealed class IntegrationEventRejectedException : Exception
 {

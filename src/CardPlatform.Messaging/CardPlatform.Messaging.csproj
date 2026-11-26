@@ -12,6 +12,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="CardPlatform.Messaging.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\CardPlatform.Contracts\CardPlatform.Contracts.csproj" />
   </ItemGroup>
 

@@ -37,14 +37,15 @@ internal static partial class ConsumerLog
     [LoggerMessage(
         EventId = 112,
         Level = LogLevel.Error,
-        Message = "Processing message {Topic} [{Partition}] @{Offset} failed ({ConsecutiveFailures} in a row); retrying it in {Delay}.")]
+        Message = "Processing message {Topic} [{Partition}] @{Offset} failed (attempt {Attempt} of {MaxAttempts}); retrying it in {Delay}.")]
     public static partial void ProcessingFailed(
         ILogger logger,
         Exception exception,
         string topic,
         int partition,
         long offset,
-        int consecutiveFailures,
+        int attempt,
+        int maxAttempts,
         TimeSpan delay);
 
     [LoggerMessage(
@@ -76,4 +77,40 @@ internal static partial class ConsumerLog
         Level = LogLevel.Information,
         Message = "Consuming resumed after {ConsecutiveFailures} failed attempt(s).")]
     public static partial void Resumed(ILogger logger, int consecutiveFailures);
+
+    [LoggerMessage(
+        EventId = 118,
+        Level = LogLevel.Information,
+        Message = "Message {Topic} [{Partition}] @{Offset} was processed after {FailedAttempts} failed attempt(s).")]
+    public static partial void Recovered(ILogger logger, string topic, int partition, long offset, int failedAttempts);
+
+    [LoggerMessage(
+        EventId = 120,
+        Level = LogLevel.Error,
+        Message = "Message {Topic} [{Partition}] @{Offset} (event {EventId}, type {EventType}) was sent to {DeadLetterTopic} after {Attempts} attempt(s) ({FailureKind}): {Reason}")]
+    public static partial void DeadLettered(
+        ILogger logger,
+        Exception exception,
+        string topic,
+        int partition,
+        long offset,
+        Guid? eventId,
+        string? eventType,
+        string deadLetterTopic,
+        int attempts,
+        string failureKind,
+        string reason);
+
+    [LoggerMessage(
+        EventId = 121,
+        Level = LogLevel.Error,
+        Message = "Sending message {Topic} [{Partition}] @{Offset} to {DeadLetterTopic} failed; it stays uncommitted and the send is retried in {Delay}.")]
+    public static partial void DeadLetterFailed(
+        ILogger logger,
+        Exception exception,
+        string topic,
+        int partition,
+        long offset,
+        string deadLetterTopic,
+        TimeSpan delay);
 }

@@ -13,7 +13,9 @@ namespace CardPlatform.Messaging.Consuming;
 /// The handler is resolved from a new scope for each message, and runs inside a transaction of that scope's
 /// <c>DbContext</c>, the one that also records the event as processed: whatever it saves with that context is committed
 /// together with the mark, or not at all. It must not commit or open transactions of its own. Throwing leaves the event
-/// unprocessed: nothing is committed, the offset is not committed and the event is delivered again.
+/// unprocessed: nothing is committed and the offset is not committed. The consumer retries the event, up to
+/// <see cref="IntegrationEventConsumerOptions.MaxAttempts"/> times, and then sends it to the dead-letter topic; throwing
+/// <see cref="IntegrationEventRejectedException"/> sends it there at once.
 /// </remarks>
 [SuppressMessage(
     "Naming",
