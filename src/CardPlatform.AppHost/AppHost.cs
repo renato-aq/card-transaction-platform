@@ -8,6 +8,7 @@ var authorizationDb = postgres.AddDatabase("authorizationdb");
 var fraudDb = postgres.AddDatabase("frauddb");
 
 var kafka = builder.AddKafka("kafka")
+    .WithDataVolume()
     .WithKafkaUI();
 
 var ledgerApi = builder.AddDotnetProject("ledger-api", "../CardPlatform.Ledger.Api")
