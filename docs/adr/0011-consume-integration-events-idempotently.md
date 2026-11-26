@@ -133,14 +133,16 @@ never skipped, for now"; the original text above is kept as it was written. It a
 - **Dead-lettering.** The message goes to `Topics.DeadLetterOf(topic)` (`<topic>.dlt`, e.g. `authorizations.dlt`,
   `fraud-signals.dlt`) through `KafkaDeadLetterProducer`, with the **original key and value byte for byte** (a malformed
   value is kept as it arrived), the original headers (`event-id`, `event-type`, anything else), and error headers
-  (`DeadLetterHeaders`, UTF-8 text): `dlt-reason` (the exception's message, at most 1000 characters),
-  `dlt-exception-type`, `dlt-failure-kind` (`permanent` or `retries-exhausted`), `dlt-attempts`, `dlt-original-topic`,
-  `dlt-original-partition`, `dlt-original-offset`, `dlt-consumer-group` (the effective group, after configuration) and
+  (`DeadLetterHeaders`, UTF-8 text): `dlt-reason` (the exception's message, at most 1000 characters; for a temporary
+  failure, its root cause's, `GetBaseException()`, so a wrapper such as EF's `RetryLimitExceededException` does not hide
+  the Npgsql error), `dlt-exception-type` (of the same exception), `dlt-failure-kind` (`permanent` or
+  `retries-exhausted`), `dlt-attempts`, `dlt-original-topic`, `dlt-original-partition`, `dlt-original-offset`,
+  `dlt-consumer-group` (the effective group, after configuration) and
   `dlt-failed-at` (UTC, ISO 8601). Error headers already on a message replayed from a dead-letter topic are replaced, not
   repeated. The send awaits the broker's acknowledgement (idempotent producer, `acks=all`); **only then is the original
   offset committed** and the partition moves on. Every dead-lettered message is logged as an error (`ConsumerLog` event
   120) with its topic, partition, offset, event id and type when known (from the headers, or from the envelope if it
-  parses), dead-letter topic, attempts, failure kind and reason.
+  parses), dead-letter topic, attempts, failure kind and reason (the same message as `dlt-reason`).
 - **If the dead-letter send fails** (broker down, topic missing with auto-creation off), nothing is committed: the
   consumer logs it (event 121), rewinds to the message and tries the send again after a backoff, without processing the
   message again, for as long as it takes. No message is lost; the partition waits, as it did before this change. If the
