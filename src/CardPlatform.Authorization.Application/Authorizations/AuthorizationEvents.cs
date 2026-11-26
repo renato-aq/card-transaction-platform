@@ -1,5 +1,4 @@
 using CardPlatform.Authorization.Application.Abstractions.Persistence;
-using CardPlatform.Authorization.Application.Common;
 using CardPlatform.Authorization.Domain.Authorizations;
 using CardPlatform.Contracts;
 using CardPlatform.Contracts.Authorizations;

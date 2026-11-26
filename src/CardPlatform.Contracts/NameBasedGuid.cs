@@ -1,11 +1,13 @@
 using System.Security.Cryptography;
 using System.Text;
 
-namespace CardPlatform.Authorization.Application.Common;
+namespace CardPlatform.Contracts;
 
 /// <summary>
 /// Name-based UUIDs, version 5 (RFC 9562, section 5.5): the same namespace and name always give the same id, so
-/// anything derived from stable data gets a stable id without storing it.
+/// anything derived from stable data gets a stable id without storing it. Producers use it for deterministic event ids
+/// (e.g. one per authorization and event type), so an event written more than once carries the same id and consumers
+/// keep only the first copy (ADR 0010).
 /// </summary>
 public static class NameBasedGuid
 {

@@ -1,6 +1,4 @@
-using CardPlatform.Authorization.Application.Common;
-
-namespace CardPlatform.Authorization.Application.Tests.Common;
+namespace CardPlatform.Contracts.Tests;
 
 public class NameBasedGuidTests
 {
