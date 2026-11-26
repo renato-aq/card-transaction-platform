@@ -8,6 +8,7 @@ using CardPlatform.Messaging.Tests.Infrastructure;
 
 using Confluent.Kafka;
 
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -188,6 +189,35 @@ public sealed class DeadLetterTests(MessagingFixture fixture) : IAsyncLifetime
         LogCapture.LogEntry logged = Assert.Single(logs.Entries, static entry => entry.EventId == DeadLetteredLogId);
         Assert.Equal(failing.EventId, logged.Values["EventId"]);
         Assert.Equal(3, logged.Values["Attempts"]);
+        Assert.Equal("Database unavailable.", logged.Values["Reason"]);
+    }
+
+    [Fact]
+    public async Task A_wrapped_failure_is_dead_lettered_with_the_type_and_message_of_its_root_cause()
+    {
+        string topic = await fixture.CreateTopicAsync(partitions: 1);
+        string groupId = NewGroupId();
+        EventEnvelope failing = MessagingFixture.NewEnvelope(Guid.NewGuid());
+        await fixture.ProduceAsync(topic, failing.PartitionKey, EventSerializer.SerializeToUtf8Bytes(failing));
+
+        LogCapture logs = new();
+        using IHost host = fixture.CreateConsumerHost(topic, groupId, logs: logs, settings: MaxAttempts(1));
+        HandlerProbe probe = host.Services.GetRequiredService<HandlerProbe>();
+
+        // What EF's retrying execution strategy throws when the database stays down.
+        probe.OnHandle = static _ => throw new RetryLimitExceededException(
+            "Maximum number of retries (6) exceeded while executing database operations. See the inner exception.",
+            new TimeoutException("Database unavailable."));
+
+        await host.StartAsync();
+        await WaitForAsync(() => Task.FromResult(CommittedOffset(groupId, topic) == 1));
+        await host.StopAsync();
+
+        ConsumeResult<string, byte[]> deadLetter = Assert.Single(await fixture.ConsumeAsync(Topics.DeadLetterOf(topic), 1));
+        Assert.Equal(typeof(TimeoutException).FullName, Header(deadLetter, DeadLetterHeaders.ExceptionType));
+        Assert.Equal("Database unavailable.", Header(deadLetter, DeadLetterHeaders.Reason));
+
+        LogCapture.LogEntry logged = Assert.Single(logs.Entries, static entry => entry.EventId == DeadLetteredLogId);
         Assert.Equal("Database unavailable.", logged.Values["Reason"]);
     }
 

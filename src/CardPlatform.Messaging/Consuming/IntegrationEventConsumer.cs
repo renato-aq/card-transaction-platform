@@ -232,7 +232,7 @@ public sealed class IntegrationEventConsumer<TDbContext>(
             deadLetterTopic,
             attempts,
             permanent ? DeadLetterHeaders.PermanentFailure : DeadLetterHeaders.RetriesExhausted,
-            exception.Message);
+            KafkaDeadLetterProducer.CauseOf(exception, permanent).Message);
 
         return Commit(result);
     }

@@ -11,7 +11,8 @@ namespace CardPlatform.Messaging.Kafka;
 /// Sends a message the integration event consumer gave up on to the dead-letter topic of its topic
 /// (<see cref="Topics.DeadLetterOf"/>, ADR 0011), with the producer registered by the Aspire integration (idempotent,
 /// <c>acks=all</c>, see <see cref="KafkaProducerDefaults"/>): the original key and value, byte for byte (so a malformed
-/// value is kept as it arrived), the original headers, and the error headers of <see cref="DeadLetterHeaders"/>.
+/// value is kept as it arrived), the original headers, and the error headers of <see cref="DeadLetterHeaders"/>, whose
+/// reason and exception type come from <see cref="CauseOf"/>.
 /// </summary>
 public sealed class KafkaDeadLetterProducer(IProducer<string, byte[]> producer, string consumerGroup, TimeProvider timeProvider)
 {
@@ -51,8 +52,9 @@ public sealed class KafkaDeadLetterProducer(IProducer<string, byte[]> producer, 
             }
         }
 
-        Add(headers, DeadLetterHeaders.Reason, Truncate(exception.Message, DeadLetterHeaders.MaxReasonLength));
-        Add(headers, DeadLetterHeaders.ExceptionType, exception.GetType().FullName ?? exception.GetType().Name);
+        Exception cause = CauseOf(exception, permanent);
+        Add(headers, DeadLetterHeaders.Reason, Truncate(cause.Message, DeadLetterHeaders.MaxReasonLength));
+        Add(headers, DeadLetterHeaders.ExceptionType, cause.GetType().FullName ?? cause.GetType().Name);
         Add(headers, DeadLetterHeaders.FailureKind, permanent ? DeadLetterHeaders.PermanentFailure : DeadLetterHeaders.RetriesExhausted);
         Add(headers, DeadLetterHeaders.Attempts, attempts.ToString(CultureInfo.InvariantCulture));
         Add(headers, DeadLetterHeaders.OriginalTopic, failed.Topic);
@@ -70,6 +72,18 @@ public sealed class KafkaDeadLetterProducer(IProducer<string, byte[]> producer, 
 
         await producer.ProduceAsync(deadLetterTopic, message, cancellationToken).ConfigureAwait(false);
         return deadLetterTopic;
+    }
+
+    /// <summary>
+    /// The exception whose message and type describe a failure: for a temporary failure its root cause
+    /// (<see cref="Exception.GetBaseException"/>), so a wrapper such as EF's <c>RetryLimitExceededException</c> ("See the
+    /// inner exception") does not hide the Npgsql error; a permanent failure is recognized by its own type
+    /// (<c>JsonException</c>, <see cref="Consuming.IntegrationEventRejectedException"/>), so it is kept as it is (a
+    /// <c>JsonException</c> wraps an internal reader exception).
+    /// </summary>
+    internal static Exception CauseOf(Exception exception, bool permanent)
+    {
+        return permanent ? exception : exception.GetBaseException();
     }
 
     private static void Add(Headers headers, string key, string value)
