@@ -1,9 +1,15 @@
 
+using System.Globalization;
+using System.Text;
+
 using CardPlatform.Contracts;
 using CardPlatform.Contracts.Authorizations;
 using CardPlatform.Fraud.Domain.Purchases;
 using CardPlatform.Fraud.Worker.Tests.Infrastructure;
 using CardPlatform.Messaging.Consuming;
+using CardPlatform.Messaging.Kafka;
+
+using Confluent.Kafka;
 
 namespace CardPlatform.Fraud.Worker.Tests;
 
@@ -113,6 +119,56 @@ public sealed class AuthorizationEventsConsumerTests(PostgreSqlFixture postgres,
     }
 
     [Fact]
+    public async Task A_malformed_message_goes_to_the_dead_letter_topic_and_the_next_message_is_processed()
+    {
+        string topic = await kafka.CreateTopicAsync(partitions: 1);
+        string groupId = NewGroupId();
+        Guid cardId = Guid.NewGuid();
+        string key = cardId.ToString("D", CultureInfo.InvariantCulture);
+        byte[] malformed = Encoding.UTF8.GetBytes("{\"eventId\": 42");
+        AuthorizationApproved approved = Approved(cardId, 10m, AuthorizedAt);
+        await kafka.PublishAsync(topic, key, malformed);
+        await kafka.PublishAsync(topic, Envelope(approved));
+
+        await using RunningWorker worker = await RunningWorker.StartAsync(postgres, kafka, topic, groupId);
+        CardHistory history = await worker.WaitForHistoryAsync(cardId, static h => h.Purchases.Count == 1);
+        await RunningWorker.WaitForAsync(() => Task.FromResult(kafka.CommittedCount(groupId, topic) == 2));
+
+        Assert.Equal(approved.AuthorizationId, Assert.Single(history.Purchases).Id);
+        Message<string, byte[]> deadLetter = Assert.Single(await kafka.ReadAllAsync(Topics.DeadLetterOf(topic)));
+        Assert.Equal(key, deadLetter.Key);
+        Assert.Equal(malformed, deadLetter.Value);
+        Assert.Equal(DeadLetterHeaders.PermanentFailure, Header(deadLetter, DeadLetterHeaders.FailureKind));
+        Assert.Equal("1", Header(deadLetter, DeadLetterHeaders.Attempts));
+        Assert.Equal(topic, Header(deadLetter, DeadLetterHeaders.OriginalTopic));
+        Assert.Equal("0", Header(deadLetter, DeadLetterHeaders.OriginalPartition));
+        Assert.Equal("0", Header(deadLetter, DeadLetterHeaders.OriginalOffset));
+        Assert.Equal(groupId, Header(deadLetter, DeadLetterHeaders.ConsumerGroup));
+    }
+
+    [Fact]
+    public async Task An_event_the_fraud_worker_rejects_goes_to_the_dead_letter_topic_without_being_retried()
+    {
+        string topic = await kafka.CreateTopicAsync(partitions: 1);
+        string groupId = NewGroupId();
+        Guid cardId = Guid.NewGuid();
+        AuthorizationApproved invalidCurrency = Approved(cardId, 10m, AuthorizedAt) with { Currency = "brl" };
+        AuthorizationApproved valid = Approved(cardId, 20m, AuthorizedAt.AddMinutes(1));
+        await kafka.PublishAsync(topic, Envelope(invalidCurrency));
+        await kafka.PublishAsync(topic, Envelope(valid));
+
+        await using RunningWorker worker = await RunningWorker.StartAsync(postgres, kafka, topic, groupId);
+        CardHistory history = await worker.WaitForHistoryAsync(cardId, static h => h.Purchases.Count == 1);
+        await RunningWorker.WaitForAsync(() => Task.FromResult(kafka.CommittedCount(groupId, topic) == 2));
+
+        Assert.Equal(valid.AuthorizationId, Assert.Single(history.Purchases).Id);
+        Message<string, byte[]> deadLetter = Assert.Single(await kafka.ReadAllAsync(Topics.DeadLetterOf(topic)));
+        Assert.Equal(typeof(IntegrationEventRejectedException).FullName, Header(deadLetter, DeadLetterHeaders.ExceptionType));
+        Assert.Equal("1", Header(deadLetter, DeadLetterHeaders.Attempts));
+        Assert.Contains("invalid_currency", Header(deadLetter, DeadLetterHeaders.Reason), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Every_decision_of_a_card_is_recorded_in_its_history()
     {
         string topic = await kafka.CreateTopicAsync();
@@ -154,6 +210,11 @@ public sealed class AuthorizationEventsConsumerTests(PostgreSqlFixture postgres,
     private static EventEnvelope Envelope(IAuthorizationEvent integrationEvent)
     {
         return EventEnvelope.Create(integrationEvent, Guid.CreateVersion7(), integrationEvent.CreatedAt);
+    }
+
+    private static string Header(Message<string, byte[]> message, string key)
+    {
+        return Encoding.UTF8.GetString(message.Headers.GetLastBytes(key));
     }
 
     private static string NewGroupId()

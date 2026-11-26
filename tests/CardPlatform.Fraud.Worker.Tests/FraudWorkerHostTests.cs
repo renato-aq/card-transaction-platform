@@ -1,5 +1,8 @@
+using CardPlatform.Contracts;
 using CardPlatform.Fraud.Infrastructure.Persistence;
 using CardPlatform.Fraud.Worker.Tests.Infrastructure;
+
+using Confluent.Kafka;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +36,32 @@ public sealed class FraudWorkerHostTests(PostgreSqlFixture postgres, KafkaFixtur
 
             Assert.Contains(applied, static migration => migration.EndsWith($"_{InitialMigration}", StringComparison.Ordinal));
             Assert.Empty(await PendingMigrationsAsync(host));
+        }
+        finally
+        {
+            await host.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task In_development_the_host_creates_the_topics_it_uses_including_the_dead_letter_topic_it_consumes_into()
+    {
+        string connectionString = await postgres.CreateDatabaseAsync();
+
+        using IHost host = WorkerHosts.Create(connectionString, kafka.BootstrapServers, Environments.Development);
+        await FraudWorkerHost.InitializeAsync(host);
+        await host.StartAsync();
+
+        try
+        {
+            using IAdminClient admin =
+                new AdminClientBuilder(new AdminClientConfig { BootstrapServers = kafka.BootstrapServers }).Build();
+            foreach (string topic in new[] { Topics.Authorizations, Topics.DeadLetterOf(Topics.Authorizations), Topics.FraudSignals })
+            {
+                TopicMetadata metadata = Assert.Single(admin.GetMetadata(topic, TimeSpan.FromSeconds(10)).Topics);
+                Assert.Equal(ErrorCode.NoError, metadata.Error.Code);
+                Assert.Equal(3, metadata.Partitions.Count);
+            }
         }
         finally
         {

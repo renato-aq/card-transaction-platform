@@ -8,6 +8,7 @@ using CardPlatform.Fraud.Infrastructure.Persistence.Outbox;
 using CardPlatform.Fraud.Infrastructure.Persistence.Repositories;
 using CardPlatform.Fraud.Infrastructure.Rules;
 using CardPlatform.Messaging;
+using CardPlatform.Messaging.Consuming;
 using CardPlatform.Messaging.Publishing;
 
 using Microsoft.EntityFrameworkCore;
@@ -34,11 +35,14 @@ public static class DependencyInjection
     /// <c>frauddb</c>, health check, retries, telemetry), the persistence adapters (including the outbox), the
     /// <see cref="FraudRules"/> with the limits of <c>Fraud:Rules</c> (<see cref="FraudRulesOptions"/>, validated on
     /// startup), the consumer of the topic <c>authorizations</c> (connection string <c>kafka</c>, consumer group
-    /// <see cref="ConsumerGroupId"/>, ADR 0011), which records every Authorization decision in the card's purchase
-    /// history once per event id, and the outbox publisher, which sends the <c>FraudSuspected</c> events to
-    /// <c>fraud-signals</c> (settings in <c>Messaging:Outbox</c>, ADR 0010; with <c>Messaging:Outbox:Enabled</c> set to
-    /// <see langword="false"/> they stay in the outbox). In Development the topics are created on startup if they do not
-    /// exist yet, so the Fraud Worker does not depend on starting after the Authorization.
+    /// <see cref="ConsumerGroupId"/>, settings in <c>Messaging:Consumer</c>, ADR 0011), which records every Authorization
+    /// decision in the card's purchase history once per event id and sends the messages it cannot process to
+    /// <c>authorizations.dlt</c>, and the outbox publisher, which sends the <c>FraudSuspected</c> events to
+    /// <c>fraud-signals</c> (settings in <c>Messaging:Outbox</c>, ADR 0010). With <c>Messaging:Consumer:Enabled</c> set to
+    /// <see langword="false"/> the consumer is not registered and the decisions wait in Kafka; with
+    /// <c>Messaging:Outbox:Enabled</c> set to <see langword="false"/> the suspicions stay in the outbox. In Development the
+    /// topics it uses are created on startup if they do not exist yet, so the Fraud Worker does not depend on starting
+    /// after the Authorization.
     /// </summary>
     public static TBuilder AddFraudInfrastructure<TBuilder>(this TBuilder builder)
         where TBuilder : IHostApplicationBuilder
@@ -62,11 +66,25 @@ public static class DependencyInjection
             services.GetRequiredService<IOptions<FraudRulesOptions>>().Value.ToRules());
 
         bool publishes = OutboxPublisherOptions.IsEnabled(builder.Configuration);
+        bool consumes = IntegrationEventConsumerOptions.IsEnabled(builder.Configuration);
 
-        if (builder.Environment.IsDevelopment())
+        if (builder.Environment.IsDevelopment() && (publishes || consumes))
         {
-            // Registered first, so the topics exist before the consumer subscribes and the publisher publishes.
-            builder.AddKafkaTopicInitializer(publishes ? [Topics.Authorizations, Topics.FraudSignals] : [Topics.Authorizations]);
+            // Registered first, so the topics exist before the consumer subscribes and the publisher publishes: the
+            // topic consumed and its dead-letter topic, and the topic published on.
+            List<string> topics = [];
+            if (consumes)
+            {
+                topics.Add(Topics.Authorizations);
+                topics.Add(Topics.DeadLetterOf(Topics.Authorizations));
+            }
+
+            if (publishes)
+            {
+                topics.Add(Topics.FraudSignals);
+            }
+
+            builder.AddKafkaTopicInitializer(topics);
         }
 
         builder.AddIntegrationEventConsumer<FraudDbContext>(ConsumerGroupId, [Topics.Authorizations]);

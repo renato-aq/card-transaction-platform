@@ -32,13 +32,19 @@ public sealed class KafkaFixture : IAsyncLifetime
         return _kafka.DisposeAsync().AsTask();
     }
 
-    /// <summary>Creates a new topic with a unique name and <paramref name="partitions"/> partitions.</summary>
+    /// <summary>
+    /// Creates a new topic with a unique name and <paramref name="partitions"/> partitions, and its dead-letter topic
+    /// (<c>&lt;topic&gt;.dlt</c>), as the worker creates <c>authorizations</c> and <c>authorizations.dlt</c> in Development.
+    /// </summary>
     public async Task<string> CreateTopicAsync(int partitions = 3)
     {
         string topic = "authorizations-" + Guid.NewGuid().ToString("N");
         using IAdminClient admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = BootstrapServers }).Build();
         await admin.CreateTopicsAsync(
-            [new TopicSpecification { Name = topic, NumPartitions = partitions, ReplicationFactor = 1 }]);
+        [
+            new TopicSpecification { Name = topic, NumPartitions = partitions, ReplicationFactor = 1 },
+            new TopicSpecification { Name = Topics.DeadLetterOf(topic), NumPartitions = 1, ReplicationFactor = 1 },
+        ]);
         return topic;
     }
 
