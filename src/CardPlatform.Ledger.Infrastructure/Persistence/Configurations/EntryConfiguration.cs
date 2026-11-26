@@ -16,6 +16,8 @@ internal sealed class EntryConfiguration : IEntityTypeConfiguration<Entry>
 
     private const string IdColumn = "Id";
 
+    private const string AccountTransactionIdIndex = "ix_entries_account_id_transaction_id_id";
+
     public void Configure(EntityTypeBuilder<Entry> builder)
     {
         builder.ToTable("entries");
@@ -44,5 +46,14 @@ internal sealed class EntryConfiguration : IEntityTypeConfiguration<Entry>
             .HasForeignKey(entry => entry.AccountId)
             .IsRequired()
             .OnDelete(DeleteBehavior.Restrict);
+
+        // The order of the Settlement Job's file: it reads each merchant's entries in this order, a page at a time
+        // starting after the last key read (keyset pagination: account_id = merchant and (transaction_id, id) > key), so
+        // the index scan starts at the key and stops at the page's limit instead of sorting every entry of the merchant
+        // or walking to the key from the merchant's first entry. The shadow foreign key to the transaction (configured with the transaction) is
+        // declared here so that the index can name it.
+        builder.Property<Guid>(TransactionIdColumn);
+        builder.HasIndex(nameof(Entry.AccountId), TransactionIdColumn, IdColumn)
+            .HasDatabaseName(AccountTransactionIdIndex);
     }
 }

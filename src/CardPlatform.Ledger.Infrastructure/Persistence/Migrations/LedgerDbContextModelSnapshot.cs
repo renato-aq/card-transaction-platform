@@ -184,11 +184,11 @@ namespace CardPlatform.Ledger.Infrastructure.Persistence.Migrations
                     b.HasKey("Id")
                         .HasName("pk_entries");
 
-                    b.HasIndex("AccountId")
-                        .HasDatabaseName("ix_entries_account_id");
-
                     b.HasIndex("TransactionId")
                         .HasDatabaseName("ix_entries_transaction_id");
+
+                    b.HasIndex("AccountId", "TransactionId", "Id")
+                        .HasDatabaseName("ix_entries_account_id_transaction_id_id");
 
                     b.ToTable("entries", (string)null);
                 });
