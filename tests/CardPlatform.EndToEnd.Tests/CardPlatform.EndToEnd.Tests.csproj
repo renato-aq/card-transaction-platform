@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Testcontainers.Kafka" Version="4.17.0" />
+    <PackageReference Include="Testcontainers.PostgreSql" Version="4.17.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The services run in process: the Authorization API and the Ledger API through WebApplicationFactory, the Fraud
+         Worker through its composition root. All three declare a global Program, so the Ledger's and the Worker's are
+         aliased. -->
+    <ProjectReference Include="..\..\src\CardPlatform.Authorization.Api\CardPlatform.Authorization.Api.csproj" />
+    <ProjectReference Include="..\..\src\CardPlatform.Ledger.Api\CardPlatform.Ledger.Api.csproj" Aliases="LedgerApi" />
+    <ProjectReference Include="..\..\src\CardPlatform.Fraud.Worker\CardPlatform.Fraud.Worker.csproj" Aliases="FraudWorker" />
+  </ItemGroup>
+
+</Project>

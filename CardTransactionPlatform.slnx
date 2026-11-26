@@ -25,6 +25,7 @@
     <Project Path="tests/CardPlatform.Authorization.Domain.Tests/CardPlatform.Authorization.Domain.Tests.csproj" />
     <Project Path="tests/CardPlatform.Authorization.Infrastructure.Tests/CardPlatform.Authorization.Infrastructure.Tests.csproj" />
     <Project Path="tests/CardPlatform.Contracts.Tests/CardPlatform.Contracts.Tests.csproj" />
+    <Project Path="tests/CardPlatform.EndToEnd.Tests/CardPlatform.EndToEnd.Tests.csproj" />
     <Project Path="tests/CardPlatform.Fraud.Application.Tests/CardPlatform.Fraud.Application.Tests.csproj" />
     <Project Path="tests/CardPlatform.Fraud.Domain.Tests/CardPlatform.Fraud.Domain.Tests.csproj" />
     <Project Path="tests/CardPlatform.Fraud.Worker.Tests/CardPlatform.Fraud.Worker.Tests.csproj" />
