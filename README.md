@@ -524,10 +524,11 @@ To inspect them, open Kafka UI from the Aspire dashboard, pick the `.dlt` topic 
 headers. Reprocessing is manual: once the cause is fixed, produce the message's key and value again to the original
 topic, to the partition in `dlt-original-partition` (so it stays with the other events of its card): e.g. with Kafka
 UI's "Produce message" (copy key and value, choose the partition), or with a CLI such as
-`kcat -C -b <broker> -t authorizations.dlt -o <offset> -c 1 -e -f '%k\t%s\n'` piped into
-`kcat -P -b <broker> -t authorizations -p <partition> -K '\t'` (the values are single-line JSON). Replays are safe: a
-dead-lettered event was not marked as processed, so it is processed normally, and an event that was processed is
-skipped by its event id.
+`kcat -C -b <broker> -t authorizations.dlt -p <dlt partition> -o <dlt offset> -c 1 -e -f '%k\t%s\n'` (the partition and
+offset of the message on the `.dlt` topic) piped into
+`kcat -P -b <broker> -t authorizations -p <dlt-original-partition> -K '\t'` (the values are single-line JSON). Replays
+are safe: a dead-lettered event was not marked as processed, so it is processed normally, and an event that was
+processed is skipped by its event id.
 
 ## Fraud Worker
 
@@ -643,19 +644,20 @@ groups `fraud-worker` and `authorization-api` have no lag.
 
 ### Kafka stopped and restarted without losing events
 
-Find the Aspire containers of Kafka and PostgreSQL, and stop the broker:
+Stop the broker with the `kafka` resource's Stop button in the Aspire dashboard, or from the CLI:
 
 ```bash
-KAFKA=$(docker ps -q --filter 'name=^kafka-[a-z]+$')
-PG=$(docker ps -q --filter 'name=^postgres-')
-docker stop "$KAFKA"
+aspire resource kafka stop
 ```
 
-Stop and start the container with `docker`, not with the dashboard's Stop/Start buttons (or
-`aspire resource kafka stop`): those remove the container and create a new one, and the AppHost gives Kafka no data
-volume, so the broker would come back empty (the waiting events would still be published, but the topics, earlier
-events and consumer offsets would be gone, and the topics would be recreated with one partition). `docker start`
-brings back the same container with its data, and Aspire's proxy keeps the broker address the services use.
+Start creates a new container, but the AppHost gives Kafka a data volume, so the broker comes back with its topics
+(still 3 partitions), earlier events and consumer offsets, and Aspire's proxy keeps the broker address the services
+use. (`docker stop` / `docker start` on the Kafka container works too.) Find the PostgreSQL container, to look at the
+outbox:
+
+```bash
+PG=$(docker ps -q --filter 'name=^postgres-')
+```
 
 With Kafka down, purchases on a new card are still approved, as fast as before:
 
@@ -683,10 +685,11 @@ outbox
        5 |     5
 ```
 
-The card is still `active`: the Fraud Worker has not seen these purchases yet. Start Kafka again:
+The card is still `active`: the Fraud Worker has not seen these purchases yet. Start Kafka again (the dashboard's
+Start button, or):
 
 ```bash
-docker start "$KAFKA"
+aspire resource kafka start
 ```
 
 Within about 30 seconds (the publisher's backoff is at most 30 s) the outbox is drained, in order:
@@ -704,6 +707,7 @@ outbox
 All five events are on the topic (or, in Kafka UI, open `authorizations` → Messages and filter by the card id):
 
 ```bash
+KAFKA=$(docker ps -q --filter 'name=^kafka-[a-z]+$')
 docker exec "$KAFKA" kafka-console-consumer --bootstrap-server localhost:29092 --topic authorizations \
   --from-beginning --timeout-ms 10000 2>/dev/null | grep -c "$OUTAGE_CARD"
 ```
@@ -771,7 +775,7 @@ docs/adr/                             Architecture Decision Records
 - [x] Transactional outbox + Kafka integration events
 - [x] Fraud Worker: rule-based detection
 - [ ] Settlement Job: batched file generation with before/after benchmarks
-- [ ] Integration tests with Testcontainers
+- [x] Integration tests with Testcontainers
 - [ ] Load tests with k6 and published results
 - [ ] Kubernetes manifests
 
