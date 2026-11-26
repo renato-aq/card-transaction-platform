@@ -1,5 +1,7 @@
+using CardPlatform.Contracts;
 using CardPlatform.Fraud.Application.Abstractions.Persistence;
 using CardPlatform.Fraud.Domain.Purchases;
+using CardPlatform.Fraud.Domain.Rules;
 
 namespace CardPlatform.Fraud.Application.Tests.Purchases;
 
@@ -37,13 +39,37 @@ internal sealed class FakeCardPurchaseRepository : ICardPurchaseRepository
         return Task.FromResult(new CardHistory(cardId, _saved.Values.Where(purchase => purchase.CardId == cardId)));
     }
 
+    public async Task<CardActivity> GetActivityAsync(CardPurchase purchase, TimeSpan window, CancellationToken cancellationToken = default)
+    {
+        return CardActivity.Of(purchase, await GetHistoryAsync(purchase.CardId, cancellationToken), window);
+    }
+
     public void Add(CardPurchase purchase)
     {
         Added.Add(purchase);
     }
 }
 
-internal sealed class FakeUnitOfWork(FakeCardPurchaseRepository purchases) : IUnitOfWork
+/// <summary>An in-memory outbox; <see cref="Add"/> tracks an event, saved by <see cref="FakeUnitOfWork"/>.</summary>
+internal sealed class FakeOutbox : IOutbox
+{
+    public List<(IIntegrationEvent Event, Guid EventId, DateTimeOffset OccurredAt)> Added { get; } = [];
+
+    public List<(IIntegrationEvent Event, Guid EventId, DateTimeOffset OccurredAt)> Saved { get; } = [];
+
+    public void Add(IIntegrationEvent integrationEvent, Guid eventId, DateTimeOffset occurredAt)
+    {
+        Added.Add((integrationEvent, eventId, occurredAt));
+    }
+
+    public void SaveAdded()
+    {
+        Saved.AddRange(Added);
+        Added.Clear();
+    }
+}
+
+internal sealed class FakeUnitOfWork(FakeCardPurchaseRepository purchases, FakeOutbox? outbox = null) : IUnitOfWork
 {
     public int SaveCount { get; private set; }
 
@@ -51,6 +77,18 @@ internal sealed class FakeUnitOfWork(FakeCardPurchaseRepository purchases) : IUn
     {
         SaveCount++;
         purchases.SaveAdded();
+        outbox?.SaveAdded();
         return Task.CompletedTask;
+    }
+}
+
+/// <summary>A clock that always says <see cref="Now"/>.</summary>
+internal sealed class FixedTimeProvider(DateTimeOffset now) : TimeProvider
+{
+    public DateTimeOffset Now { get; } = now;
+
+    public override DateTimeOffset GetUtcNow()
+    {
+        return Now;
     }
 }

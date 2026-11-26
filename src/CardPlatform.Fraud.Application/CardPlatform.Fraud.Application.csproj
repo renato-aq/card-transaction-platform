@@ -11,6 +11,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\CardPlatform.Contracts\CardPlatform.Contracts.csproj" />
     <ProjectReference Include="..\CardPlatform.Fraud.Domain\CardPlatform.Fraud.Domain.csproj" />
   </ItemGroup>
 
