@@ -8,6 +8,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CardPlatform.Authorization.Application\CardPlatform.Authorization.Application.csproj" />
+    <ProjectReference Include="..\CardPlatform.Messaging\CardPlatform.Messaging.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="CardPlatform.Authorization.Infrastructure.Tests" />
   </ItemGroup>
 
   <ItemGroup>

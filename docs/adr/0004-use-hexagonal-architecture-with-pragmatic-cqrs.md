@@ -57,3 +57,24 @@ the way of streaming and batching optimizations.
   business complexity justifies it.
 - Explicit handler interfaces mean no third-party mediator dependency or licensing concerns, at the cost
   of writing a small amount of plumbing code.
+
+## Amendment (2026-11-25)
+
+The Fraud Worker and the integration events (ADR 0010) changed this decision; the original text above is kept as
+it was written.
+
+- **The Fraud Worker follows this structure.** It is split into `CardPlatform.Fraud.Domain`, `.Application` and
+  `.Infrastructure`, with `CardPlatform.Fraud.Worker` in the place the table gives to `*.Api` as the composition
+  root. The inbound adapters, which map the authorization events to commands, are
+  `IIntegrationEventHandler<TEvent>` implementations in Infrastructure, the only layer that may use
+  `CardPlatform.Messaging`, hosted by the shared consumer (ADR 0011); the Worker wires them through
+  `AddFraudInfrastructure()`. Its fraud rules (velocity, amount above the card's average) are real domain logic
+  that deserves isolation and unit tests, and it needs its own database (`frauddb`) for the per-card history and
+  the messages already processed. The architecture tests apply the same rules to the Ledger, the Authorization and
+  the Fraud Worker, with the entry point generalized as the "host" layer (`*.Api` or `*.Worker`).
+- **The exception applies to the Settlement Job only**, for the reasons given above.
+- **`*.Application` may also depend on `CardPlatform.Contracts`.** The contracts are plain integration-event
+  records serialized with System.Text.Json, with no framework dependency. The Authorization's Application maps its
+  decisions to integration events and writes them through an outbox port (`IOutbox`, ADR 0010). The Domain still
+  does not depend on the contracts (`Domain_does_not_depend_on_integration_contracts`), and
+  `CardPlatform.Messaging` (the outbox and Kafka plumbing) is referenced only by Infrastructure.

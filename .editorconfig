@@ -391,3 +391,8 @@ dotnet_naming_style.s_camelcase.capitalization = camel_case
 # Test projects: allow underscores in test method names (Method_scenario_expected).
 [tests/**.cs]
 dotnet_diagnostic.CA1707.severity = none
+
+
+# EF Core migrations are generated: their constant arrays (e.g. the columns of a composite index) run once.
+[src/**/Persistence/Migrations/*.cs]
+dotnet_diagnostic.CA1861.severity = none

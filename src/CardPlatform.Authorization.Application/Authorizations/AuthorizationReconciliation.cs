@@ -32,8 +32,17 @@ namespace CardPlatform.Authorization.Application.Authorizations;
 /// gets <see cref="LedgerErrors.HoldNotPendingCode"/> and reconciles to the hold's final state. Every save therefore
 /// writes the same final status, which can never change again, so a last-writer-wins update converges; at worst
 /// <see cref="CardAuthorization.CompletedAt"/> holds the time of the last request that recorded it.
+/// <para>
+/// Every completion is saved with the event of the status the authorization ends up in (<c>AuthorizationCaptured</c> or
+/// <c>AuthorizationVoided</c>, also when it is the other final state), added to the outbox before the same save.
+/// Concurrent writers may both add it; the events share a deterministic id (see <see cref="AuthorizationEvents"/>).
+/// </para>
 /// </remarks>
-internal sealed class AuthorizationReconciliation(ILedgerClient ledger, IUnitOfWork unitOfWork, TimeProvider timeProvider)
+internal sealed class AuthorizationReconciliation(
+    ILedgerClient ledger,
+    IOutbox outbox,
+    IUnitOfWork unitOfWork,
+    TimeProvider timeProvider)
 {
     /// <summary>Whether a Ledger capture or void failed because the hold was already captured or voided.</summary>
     public static bool IsHoldNotPending(Error error)
@@ -87,6 +96,7 @@ internal sealed class AuthorizationReconciliation(ILedgerClient ledger, IUnitOfW
             throw new InvalidOperationException(completed.Error.Message);
         }
 
+        outbox.AddEventOf(authorization);
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
 
         if (actual == expected)

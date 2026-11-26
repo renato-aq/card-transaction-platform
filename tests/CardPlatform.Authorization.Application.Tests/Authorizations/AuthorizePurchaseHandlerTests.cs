@@ -6,6 +6,9 @@ using CardPlatform.Authorization.Domain.Authorizations;
 using CardPlatform.Authorization.Domain.Cards;
 using CardPlatform.Authorization.Domain.Common;
 using CardPlatform.Authorization.Domain.Monetary;
+using CardPlatform.Contracts.Authorizations;
+
+using DeclineReasons = CardPlatform.Authorization.Application.Authorizations.DeclineReasons;
 
 namespace CardPlatform.Authorization.Application.Tests.Authorizations;
 
@@ -17,7 +20,13 @@ public class AuthorizePurchaseHandlerTests
     private readonly Guid _merchantAccountId = Guid.NewGuid();
     private readonly FakeHoldLedgerClient _ledger = new();
     private readonly FakeAuthorizationRepository _authorizations = new();
-    private readonly FakeUnitOfWork _unitOfWork = new();
+    private readonly FakeOutbox _outbox = new();
+    private readonly OutboxUnitOfWork _unitOfWork;
+
+    public AuthorizePurchaseHandlerTests()
+    {
+        _unitOfWork = new OutboxUnitOfWork(_outbox);
+    }
 
     [Fact]
     public async Task Approves_and_places_the_hold_with_the_authorization_id()
@@ -36,6 +45,46 @@ public class AuthorizePurchaseHandlerTests
         Assert.Equal(
             new AuthorizationDto(saved.Id, AuthorizationStatus.Approved, null, _card.Id, _merchantAccountId, 30.00m, "BRL", Now),
             result.Value);
+    }
+
+    [Fact]
+    public async Task Approved_authorization_is_saved_with_an_authorization_approved_event()
+    {
+        Result<AuthorizationDto> result = await CreateHandler(new FixedTimeProvider(Now.AddTicks(7)))
+            .HandleAsync(Purchase(30m, "BRL"));
+
+        Guid id = result.Value.Id;
+        OutboxEntry entry = Assert.Single(_outbox.Added);
+        Assert.Equal(new AuthorizationApproved(id, _card.Id, _merchantAccountId, 30m, "BRL", Now), entry.Event);
+        Assert.Equal(AuthorizationEvents.EventIdOf(id, typeof(AuthorizationApproved)), entry.EventId);
+        Assert.Equal(Now, entry.OccurredAt);
+        Assert.Equal([1], _unitOfWork.EventsAtSave);
+    }
+
+    [Theory]
+    [InlineData(false, DeclineReasons.CardBlockedCode)]
+    [InlineData(true, DeclineReasons.InsufficientFundsCode)]
+    public async Task Declined_authorization_is_saved_with_an_authorization_declined_event_and_its_reason(
+        bool refusedByTheLedger,
+        string reason)
+    {
+        if (refusedByTheLedger)
+        {
+            _ledger.PlaceHoldError = Error.BusinessRule(LedgerErrors.InsufficientFundsCode, "Insufficient funds.");
+        }
+        else
+        {
+            _card.Block();
+        }
+
+        Result<AuthorizationDto> result = await CreateHandler().HandleAsync(Purchase(30m, "BRL"));
+
+        Guid id = result.Value.Id;
+        OutboxEntry entry = Assert.Single(_outbox.Added);
+        Assert.Equal(new AuthorizationDeclined(id, _card.Id, _merchantAccountId, 30m, "BRL", Now, reason), entry.Event);
+        Assert.Equal(AuthorizationEvents.EventIdOf(id, typeof(AuthorizationDeclined)), entry.EventId);
+        Assert.Equal(Now, entry.OccurredAt);
+        Assert.Equal([1], _unitOfWork.EventsAtSave);
     }
 
     [Fact]
@@ -200,6 +249,7 @@ public class AuthorizePurchaseHandlerTests
     private void AssertNothingSaved()
     {
         Assert.Empty(_authorizations.Added);
+        Assert.Empty(_outbox.Added);
         Assert.Equal(0, _unitOfWork.SaveCount);
     }
 
@@ -209,6 +259,7 @@ public class AuthorizePurchaseHandlerTests
             _ledger,
             new FakeCardRepository(_card),
             _authorizations,
+            _outbox,
             _unitOfWork,
             timeProvider ?? new FixedTimeProvider(Now));
     }

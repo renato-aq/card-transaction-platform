@@ -5,6 +5,7 @@ using CardPlatform.Authorization.Domain.Authorizations;
 using CardPlatform.Authorization.Domain.Cards;
 using CardPlatform.Authorization.Domain.Common;
 using CardPlatform.Authorization.Domain.Monetary;
+using CardPlatform.Contracts.Authorizations;
 
 namespace CardPlatform.Authorization.Application.Tests.Authorizations;
 
@@ -17,10 +18,12 @@ public class VoidAuthorizationHandlerTests
     private readonly CardAuthorization _authorization;
     private readonly FakeCompletionLedgerClient _ledger = new();
     private readonly FakeAuthorizationRepository _authorizations;
-    private readonly FakeUnitOfWork _unitOfWork = new();
+    private readonly FakeOutbox _outbox = new();
+    private readonly OutboxUnitOfWork _unitOfWork;
 
     public VoidAuthorizationHandlerTests()
     {
+        _unitOfWork = new OutboxUnitOfWork(_outbox);
         Card card = Card.Create(Guid.NewGuid(), Currency.Create("BRL").Value, CreatedAt.AddDays(-1));
         _authorization = CardAuthorization.Approve(
             Guid.CreateVersion7(), card, Guid.NewGuid(), Money.Create(30m, "BRL").Value, CreatedAt);
@@ -39,6 +42,21 @@ public class VoidAuthorizationHandlerTests
         Assert.Equal(1, _unitOfWork.SaveCount);
         Assert.Equal(AuthorizationStatus.Voided, result.Value.Status);
         Assert.Equal(Now, result.Value.CompletedAt);
+    }
+
+    [Fact]
+    public async Task Void_is_saved_with_an_authorization_voided_event()
+    {
+        await Void();
+
+        OutboxEntry entry = Assert.Single(_outbox.Added);
+        Assert.Equal(
+            new AuthorizationVoided(
+                _authorization.Id, _authorization.CardId, _authorization.MerchantAccountId, 30m, "BRL", CreatedAt, Now),
+            entry.Event);
+        Assert.Equal(AuthorizationEvents.EventIdOf(_authorization.Id, typeof(AuthorizationVoided)), entry.EventId);
+        Assert.Equal(Now, entry.OccurredAt);
+        Assert.Equal([1], _unitOfWork.EventsAtSave);
     }
 
     [Fact]
@@ -112,6 +130,8 @@ public class VoidAuthorizationHandlerTests
         Assert.Equal(AuthorizationStatus.Voided, result.Value.Status);
         Assert.Equal(AuthorizationStatus.Voided, _authorization.Status);
         Assert.Equal(1, _unitOfWork.SaveCount);
+        Assert.IsType<AuthorizationVoided>(Assert.Single(_outbox.Added).Event);
+        Assert.Equal([1], _unitOfWork.EventsAtSave);
     }
 
     [Fact]
@@ -126,6 +146,13 @@ public class VoidAuthorizationHandlerTests
         Assert.Equal(AuthorizationStatus.Captured, _authorization.Status);
         Assert.Equal(Now, _authorization.CompletedAt);
         Assert.Equal(1, _unitOfWork.SaveCount);
+
+        // The event follows the status the authorization was saved with, not the operation that was asked for.
+        OutboxEntry entry = Assert.Single(_outbox.Added);
+        AuthorizationCaptured captured = Assert.IsType<AuthorizationCaptured>(entry.Event);
+        Assert.Equal(Now, captured.CompletedAt);
+        Assert.Equal(AuthorizationEvents.EventIdOf(_authorization.Id, typeof(AuthorizationCaptured)), entry.EventId);
+        Assert.Equal([1], _unitOfWork.EventsAtSave);
     }
 
     [Fact]
@@ -167,6 +194,7 @@ public class VoidAuthorizationHandlerTests
         Assert.Equal(AuthorizationStatus.Approved, _authorization.Status);
         Assert.Null(_authorization.CompletedAt);
         Assert.Equal(0, _unitOfWork.SaveCount);
+        Assert.Empty(_outbox.Added);
     }
 
     private static void AssertError(Result<AuthorizationDto> result, string code, ErrorType type)
@@ -178,6 +206,6 @@ public class VoidAuthorizationHandlerTests
 
     private VoidAuthorizationHandler CreateHandler()
     {
-        return new VoidAuthorizationHandler(_ledger, _authorizations, _unitOfWork, new FixedTimeProvider(Now));
+        return new VoidAuthorizationHandler(_ledger, _authorizations, _outbox, _unitOfWork, new FixedTimeProvider(Now));
     }
 }

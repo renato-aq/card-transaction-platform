@@ -5,8 +5,10 @@ var postgres = builder.AddPostgres("postgres")
 
 var ledgerDb = postgres.AddDatabase("ledgerdb");
 var authorizationDb = postgres.AddDatabase("authorizationdb");
+var fraudDb = postgres.AddDatabase("frauddb");
 
 var kafka = builder.AddKafka("kafka")
+    .WithDataVolume()
     .WithKafkaUI();
 
 var ledgerApi = builder.AddDotnetProject("ledger-api", "../CardPlatform.Ledger.Api")
@@ -24,6 +26,8 @@ builder.AddDotnetProject("authorization-api", "../CardPlatform.Authorization.Api
     .WaitFor(kafka);
 
 builder.AddDotnetProject("fraud-worker", "../CardPlatform.Fraud.Worker")
+    .WithReference(fraudDb)
+    .WaitFor(fraudDb)
     .WithReference(kafka)
     .WaitFor(kafka);
 

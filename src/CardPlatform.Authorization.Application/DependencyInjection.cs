@@ -19,7 +19,8 @@ public static class DependencyInjection
     /// Purchases are authorized only through <see cref="IdempotentAuthorizePurchase"/> (ADR 0008): its handler wraps an
     /// <see cref="AuthorizePurchaseHandler"/> whose save is deferred (<see cref="DeferredUnitOfWork"/>), so the
     /// authorization and the response of its idempotency key are saved together by the scoped
-    /// <see cref="IUnitOfWork"/>. It also needs an <see cref="IAuthorizationResponseFactory"/>, registered by the API.
+    /// <see cref="IUnitOfWork"/>, together with the authorization's event in the <see cref="IOutbox"/>. It also needs an
+    /// <see cref="IAuthorizationResponseFactory"/>, registered by the API.
     /// </para>
     /// </summary>
     public static IServiceCollection AddAuthorizationApplication(this IServiceCollection services)
@@ -36,6 +37,7 @@ public static class DependencyInjection
                     provider.GetRequiredService<ILedgerClient>(),
                     provider.GetRequiredService<ICardRepository>(),
                     provider.GetRequiredService<IAuthorizationRepository>(),
+                    provider.GetRequiredService<IOutbox>(),
                     new DeferredUnitOfWork(),
                     provider.GetRequiredService<TimeProvider>()),
                 provider.GetRequiredService<IIdempotencyKeyStore>(),

@@ -3,11 +3,18 @@ using CardPlatform.Authorization.Application.Abstractions.Messaging;
 using CardPlatform.Authorization.Application.Abstractions.Persistence;
 using CardPlatform.Authorization.Application.Authorizations;
 using CardPlatform.Authorization.Application.Cards;
+using CardPlatform.Authorization.Infrastructure.Consuming;
 using CardPlatform.Authorization.Infrastructure.Ledger;
 using CardPlatform.Authorization.Infrastructure.Persistence;
 using CardPlatform.Authorization.Infrastructure.Persistence.Idempotency;
+using CardPlatform.Authorization.Infrastructure.Persistence.Outbox;
 using CardPlatform.Authorization.Infrastructure.Persistence.Repositories;
 using CardPlatform.Authorization.Infrastructure.Queries;
+using CardPlatform.Contracts;
+using CardPlatform.Contracts.Fraud;
+using CardPlatform.Messaging;
+using CardPlatform.Messaging.Consuming;
+using CardPlatform.Messaging.Publishing;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,13 +29,28 @@ public static class DependencyInjection
     /// <summary>Name of the connection string declared by the AppHost (<c>postgres.AddDatabase("authorizationdb")</c>).</summary>
     public const string ConnectionName = "authorizationdb";
 
+    /// <summary>
+    /// Default Kafka consumer group of the Authorization's consumer of <c>fraud-signals</c>;
+    /// <c>Aspire:Confluent:Kafka:Consumer:Config:GroupId</c> overrides it.
+    /// </summary>
+    public const string ConsumerGroupId = "authorization-api";
+
     /// <summary>Name of the <see cref="HttpClient"/> that talks to the Ledger.</summary>
     public const string LedgerHttpClientName = "ledger";
 
     /// <summary>
     /// Registers the <see cref="AuthorizationDbContext"/> through the Aspire PostgreSQL integration (connection string
-    /// <c>authorizationdb</c>, health check, retries, telemetry), the persistence adapters, the query handlers, which
-    /// read the database directly, and the Ledger client.
+    /// <c>authorizationdb</c>, health check, retries, telemetry), the persistence adapters (including the outbox, which
+    /// needs a <see cref="TimeProvider"/> from the composition root), the query handlers, which read the database
+    /// directly, the Ledger client, the outbox publisher, which sends the decisions written to the outbox to Kafka
+    /// (connection string <c>kafka</c>, settings in <c>Messaging:Outbox</c>, see ADR 0010), and the consumer of
+    /// <c>fraud-signals</c> (consumer group <see cref="ConsumerGroupId"/>, settings in <c>Messaging:Consumer</c>, see
+    /// ADR 0011), which blocks the card of each <c>FraudSuspected</c> once per event id and sends the messages it cannot
+    /// process to <c>fraud-signals.dlt</c>. In Development the Kafka topics
+    /// the Authorization uses are created on startup. With <c>Messaging:Outbox:Enabled</c> set to
+    /// <see langword="false"/> the publisher is not registered and the decisions stay in the outbox; with
+    /// <c>Messaging:Consumer:Enabled</c> set to <see langword="false"/> the consumer is not registered and the fraud
+    /// signals wait in Kafka. With both off, nothing needs Kafka.
     /// </summary>
     public static TBuilder AddAuthorizationInfrastructure<TBuilder>(this TBuilder builder)
         where TBuilder : IHostApplicationBuilder
@@ -42,12 +64,46 @@ public static class DependencyInjection
         builder.Services.AddScoped<ICardRepository, CardRepository>();
         builder.Services.AddScoped<IAuthorizationRepository, AuthorizationRepository>();
         builder.Services.AddScoped<IIdempotencyKeyStore, IdempotencyKeyStore>();
+        builder.Services.AddScoped<IOutbox, EfOutbox>();
         builder.Services.AddScoped<IUnitOfWork>(static services => services.GetRequiredService<AuthorizationDbContext>());
 
         builder.Services.AddScoped<IQueryHandler<GetCard, CardDto>, GetCardHandler>();
         builder.Services.AddScoped<IQueryHandler<GetAuthorization, AuthorizationDto>, GetAuthorizationHandler>();
 
         builder.Services.AddLedgerClient();
+
+        bool publishes = OutboxPublisherOptions.IsEnabled(builder.Configuration);
+        bool consumes = IntegrationEventConsumerOptions.IsEnabled(builder.Configuration);
+
+        if (builder.Environment.IsDevelopment() && (publishes || consumes))
+        {
+            // The topic it publishes on, and the one it consumes with its dead-letter topic; registered first, so the topics exist before the
+            // publisher publishes and the consumer subscribes.
+            List<string> topics = [];
+            if (publishes)
+            {
+                topics.Add(Topics.Authorizations);
+            }
+
+            if (consumes)
+            {
+                topics.Add(Topics.FraudSignals);
+                topics.Add(Topics.DeadLetterOf(Topics.FraudSignals));
+            }
+
+            builder.AddKafkaTopicInitializer(topics);
+        }
+
+        if (publishes)
+        {
+            builder.AddOutboxPublisher<AuthorizationDbContext>();
+        }
+
+        if (consumes)
+        {
+            builder.AddIntegrationEventConsumer<AuthorizationDbContext>(ConsumerGroupId, [Topics.FraudSignals]);
+            builder.Services.AddIntegrationEventHandler<FraudSuspected, FraudSuspectedHandler>();
+        }
 
         return builder;
     }

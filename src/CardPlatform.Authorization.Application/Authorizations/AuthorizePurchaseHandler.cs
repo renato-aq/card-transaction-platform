@@ -23,6 +23,10 @@ namespace CardPlatform.Authorization.Application.Authorizations;
 /// </list>
 /// Any other Ledger failure is returned as it is (e.g. <see cref="LedgerErrors.UnavailableCode"/>) and nothing is
 /// recorded. The merchant account is only checked for format: the Ledger checks it when the authorization is captured.
+/// <para>
+/// An authorization is recorded together with its event (<c>AuthorizationApproved</c> or <c>AuthorizationDeclined</c>)
+/// in the outbox, saved by the same unit of work; nothing is added to the outbox on a failure.
+/// </para>
 /// </summary>
 /// <remarks>
 /// The authorization id is chosen once, before the Ledger is called, because it is also the hold id: it is
@@ -36,6 +40,7 @@ public sealed class AuthorizePurchaseHandler(
     ILedgerClient ledger,
     ICardRepository cards,
     IAuthorizationRepository authorizations,
+    IOutbox outbox,
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider) : ICommandHandler<AuthorizePurchase, AuthorizationDto>
 {
@@ -117,6 +122,7 @@ public sealed class AuthorizePurchaseHandler(
         CancellationToken cancellationToken)
     {
         authorizations.Add(authorization);
+        outbox.AddEventOf(authorization);
         await unitOfWork.SaveChangesAsync(cancellationToken).ConfigureAwait(false);
         return Result.Success(AuthorizationDto.From(authorization));
     }

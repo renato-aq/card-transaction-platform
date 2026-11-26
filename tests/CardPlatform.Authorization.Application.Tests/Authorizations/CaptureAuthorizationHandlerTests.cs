@@ -5,6 +5,7 @@ using CardPlatform.Authorization.Domain.Authorizations;
 using CardPlatform.Authorization.Domain.Cards;
 using CardPlatform.Authorization.Domain.Common;
 using CardPlatform.Authorization.Domain.Monetary;
+using CardPlatform.Contracts.Authorizations;
 
 namespace CardPlatform.Authorization.Application.Tests.Authorizations;
 
@@ -18,10 +19,12 @@ public class CaptureAuthorizationHandlerTests
     private readonly CardAuthorization _authorization;
     private readonly FakeCompletionLedgerClient _ledger = new();
     private readonly FakeAuthorizationRepository _authorizations;
-    private readonly FakeUnitOfWork _unitOfWork = new();
+    private readonly FakeOutbox _outbox = new();
+    private readonly OutboxUnitOfWork _unitOfWork;
 
     public CaptureAuthorizationHandlerTests()
     {
+        _unitOfWork = new OutboxUnitOfWork(_outbox);
         Card card = Card.Create(Guid.NewGuid(), Currency.Create("BRL").Value, CreatedAt.AddDays(-1));
         _authorization = CardAuthorization.Approve(
             Guid.CreateVersion7(), card, _merchantAccountId, Money.Create(30m, "BRL").Value, CreatedAt);
@@ -42,6 +45,48 @@ public class CaptureAuthorizationHandlerTests
         Assert.Equal(AuthorizationStatus.Captured, result.Value.Status);
         Assert.Equal(Now, result.Value.CompletedAt);
         Assert.Equal(_authorization.Id, result.Value.Id);
+    }
+
+    [Fact]
+    public async Task Capture_is_saved_with_an_authorization_captured_event()
+    {
+        await Capture();
+
+        OutboxEntry entry = Assert.Single(_outbox.Added);
+        Assert.Equal(
+            new AuthorizationCaptured(_authorization.Id, _authorization.CardId, _merchantAccountId, 30m, "BRL", CreatedAt, Now),
+            entry.Event);
+        Assert.Equal(AuthorizationEvents.EventIdOf(_authorization.Id, typeof(AuthorizationCaptured)), entry.EventId);
+        Assert.Equal(Now, entry.OccurredAt);
+        Assert.Equal([1], _unitOfWork.EventsAtSave);
+    }
+
+    [Fact]
+    public async Task Concurrent_captures_that_both_save_the_status_write_events_with_the_same_id()
+    {
+        // Two requests loaded the authorization while it was approved: the first captures the hold, the second gets
+        // hold_not_pending and reconciles to the same status (ADR 0007). Both save it, so both write the event.
+        Card card = Card.Create(_authorization.CardId, Currency.Create("BRL").Value, CreatedAt.AddDays(-1));
+        CardAuthorization sameAuthorization = CardAuthorization.Approve(
+            _authorization.Id, card, _merchantAccountId, Money.Create(30m, "BRL").Value, CreatedAt);
+        FakeCompletionLedgerClient reconcilingLedger = new()
+        {
+            CaptureError = HoldNotPending(),
+            HoldStatus = LedgerHoldStatus.Captured,
+        };
+        FakeOutbox otherOutbox = new();
+
+        await Capture();
+        Result<AuthorizationDto> second = await new CaptureAuthorizationHandler(
+                reconcilingLedger,
+                new FakeAuthorizationRepository(sameAuthorization),
+                otherOutbox,
+                new OutboxUnitOfWork(otherOutbox),
+                new FixedTimeProvider(Now.AddSeconds(1)))
+            .HandleAsync(new CaptureAuthorization(_authorization.Id));
+
+        Assert.True(second.IsSuccess);
+        Assert.Equal(Assert.Single(_outbox.Added).EventId, Assert.Single(otherOutbox.Added).EventId);
     }
 
     [Fact]
@@ -132,6 +177,8 @@ public class CaptureAuthorizationHandlerTests
         Assert.Equal(AuthorizationStatus.Captured, _authorization.Status);
         Assert.Equal(Now, _authorization.CompletedAt);
         Assert.Equal(1, _unitOfWork.SaveCount);
+        Assert.IsType<AuthorizationCaptured>(Assert.Single(_outbox.Added).Event);
+        Assert.Equal([1], _unitOfWork.EventsAtSave);
     }
 
     [Fact]
@@ -146,6 +193,14 @@ public class CaptureAuthorizationHandlerTests
         Assert.Equal(AuthorizationStatus.Voided, _authorization.Status);
         Assert.Equal(Now, _authorization.CompletedAt);
         Assert.Equal(1, _unitOfWork.SaveCount);
+
+        // The event follows the status the authorization was saved with, not the operation that was asked for.
+        OutboxEntry entry = Assert.Single(_outbox.Added);
+        Assert.Equal(
+            new AuthorizationVoided(_authorization.Id, _authorization.CardId, _merchantAccountId, 30m, "BRL", CreatedAt, Now),
+            entry.Event);
+        Assert.Equal(AuthorizationEvents.EventIdOf(_authorization.Id, typeof(AuthorizationVoided)), entry.EventId);
+        Assert.Equal([1], _unitOfWork.EventsAtSave);
     }
 
     [Fact]
@@ -187,6 +242,7 @@ public class CaptureAuthorizationHandlerTests
         Assert.Equal(AuthorizationStatus.Approved, _authorization.Status);
         Assert.Null(_authorization.CompletedAt);
         Assert.Equal(0, _unitOfWork.SaveCount);
+        Assert.Empty(_outbox.Added);
     }
 
     private static void AssertError(Result<AuthorizationDto> result, string code, ErrorType type)
@@ -199,6 +255,6 @@ public class CaptureAuthorizationHandlerTests
     private CaptureAuthorizationHandler CreateHandler(TimeProvider? timeProvider = null)
     {
         return new CaptureAuthorizationHandler(
-            _ledger, _authorizations, _unitOfWork, timeProvider ?? new FixedTimeProvider(Now));
+            _ledger, _authorizations, _outbox, _unitOfWork, timeProvider ?? new FixedTimeProvider(Now));
     }
 }

@@ -24,10 +24,16 @@
     <ProjectReference Include="..\..\src\CardPlatform.Authorization.Application\CardPlatform.Authorization.Application.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Authorization.Domain\CardPlatform.Authorization.Domain.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Authorization.Infrastructure\CardPlatform.Authorization.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CardPlatform.Contracts\CardPlatform.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\CardPlatform.Fraud.Application\CardPlatform.Fraud.Application.csproj" />
+    <ProjectReference Include="..\..\src\CardPlatform.Fraud.Domain\CardPlatform.Fraud.Domain.csproj" />
+    <ProjectReference Include="..\..\src\CardPlatform.Fraud.Infrastructure\CardPlatform.Fraud.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CardPlatform.Fraud.Worker\CardPlatform.Fraud.Worker.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Ledger.Api\CardPlatform.Ledger.Api.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Ledger.Application\CardPlatform.Ledger.Application.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Ledger.Domain\CardPlatform.Ledger.Domain.csproj" />
     <ProjectReference Include="..\..\src\CardPlatform.Ledger.Infrastructure\CardPlatform.Ledger.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\CardPlatform.Messaging\CardPlatform.Messaging.csproj" />
   </ItemGroup>
 
 </Project>

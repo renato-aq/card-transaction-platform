@@ -23,6 +23,7 @@ namespace CardPlatform.Authorization.Application.Authorizations;
 public sealed class CaptureAuthorizationHandler(
     ILedgerClient ledger,
     IAuthorizationRepository authorizations,
+    IOutbox outbox,
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider) : ICommandHandler<CaptureAuthorization, AuthorizationDto>
 {
@@ -55,7 +56,7 @@ public sealed class CaptureAuthorizationHandler(
             return Result.Failure<AuthorizationDto>(captured.Error);
         }
 
-        return await new AuthorizationReconciliation(ledger, unitOfWork, timeProvider)
+        return await new AuthorizationReconciliation(ledger, outbox, unitOfWork, timeProvider)
             .CompleteAsync(
                 authorization,
                 captured.IsSuccess ? null : captured.Error,

@@ -22,6 +22,7 @@ namespace CardPlatform.Authorization.Application.Authorizations;
 public sealed class VoidAuthorizationHandler(
     ILedgerClient ledger,
     IAuthorizationRepository authorizations,
+    IOutbox outbox,
     IUnitOfWork unitOfWork,
     TimeProvider timeProvider) : ICommandHandler<VoidAuthorization, AuthorizationDto>
 {
@@ -54,7 +55,7 @@ public sealed class VoidAuthorizationHandler(
             return Result.Failure<AuthorizationDto>(voided.Error);
         }
 
-        return await new AuthorizationReconciliation(ledger, unitOfWork, timeProvider)
+        return await new AuthorizationReconciliation(ledger, outbox, unitOfWork, timeProvider)
             .CompleteAsync(
                 authorization,
                 voided.IsSuccess ? null : voided.Error,
