@@ -163,6 +163,28 @@ namespace CardPlatform.Authorization.Infrastructure.Persistence.Migrations
                     b.ToTable("idempotency_keys", (string)null);
                 });
 
+            modelBuilder.Entity("CardPlatform.Messaging.Consuming.ProcessedMessage", b =>
+                {
+                    b.Property<Guid>("EventId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("event_id");
+
+                    b.Property<DateTimeOffset>("ProcessedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("processed_at");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("type");
+
+                    b.HasKey("EventId")
+                        .HasName("pk_processed_messages");
+
+                    b.ToTable("processed_messages", (string)null);
+                });
+
             modelBuilder.Entity("CardPlatform.Messaging.Outbox.OutboxMessage", b =>
                 {
                     b.Property<long>("Id")

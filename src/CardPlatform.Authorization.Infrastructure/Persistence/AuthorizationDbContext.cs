@@ -3,6 +3,7 @@ using CardPlatform.Authorization.Domain.Authorizations;
 using CardPlatform.Authorization.Domain.Cards;
 using CardPlatform.Authorization.Infrastructure.Persistence.Configurations;
 using CardPlatform.Authorization.Infrastructure.Persistence.Idempotency;
+using CardPlatform.Messaging.Consuming;
 using CardPlatform.Messaging.Outbox;
 
 using Microsoft.EntityFrameworkCore;
@@ -13,7 +14,8 @@ namespace CardPlatform.Authorization.Infrastructure.Persistence;
 
 /// <summary>
 /// EF Core context of the Authorization. Mappings live in <c>IEntityTypeConfiguration</c> classes of this assembly,
-/// except the outbox's, shared through <c>CardPlatform.Messaging</c>; the domain model has no EF attributes.
+/// except the outbox's and the processed messages', shared through <c>CardPlatform.Messaging</c>; the domain model has no
+/// EF attributes.
 /// </summary>
 public sealed class AuthorizationDbContext(DbContextOptions<AuthorizationDbContext> options) : DbContext(options), IUnitOfWork
 {
@@ -24,6 +26,9 @@ public sealed class AuthorizationDbContext(DbContextOptions<AuthorizationDbConte
     public DbSet<IdempotencyKeyRecord> IdempotencyKeys => Set<IdempotencyKeyRecord>();
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+
+    /// <summary>The integration events the consumer of <c>fraud-signals</c> already processed (ADR 0011).</summary>
+    public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
     /// <remarks>
     /// When the save fails, EF Core rolls its transaction back and every tracked change is then discarded, so nothing that
@@ -80,5 +85,6 @@ public sealed class AuthorizationDbContext(DbContextOptions<AuthorizationDbConte
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(AuthorizationDbContext).Assembly);
         modelBuilder.ApplyOutbox();
+        modelBuilder.ApplyProcessedMessages();
     }
 }
