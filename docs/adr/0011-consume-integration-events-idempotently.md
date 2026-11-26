@@ -94,7 +94,7 @@ only layer that may use `CardPlatform.Messaging`; the Worker remains the composi
   dead-letter topic exists; other partitions keep flowing, slowed by the backoff of the shared loop.
 - `processed_messages` grows with every event; cleaning up old rows (older than the topic's retention) is not done yet.
 
-## Amendment (2026-11-26)
+## Amendment (2026-11-25)
 
 The Authorization became the second consumer (spec 006 of the fraud task); the original text above is kept as it was
 written.
