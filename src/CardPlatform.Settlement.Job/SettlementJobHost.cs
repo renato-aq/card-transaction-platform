@@ -55,12 +55,33 @@ public static partial class SettlementJobHost
         HostApplicationBuilder builder = Host.CreateApplicationBuilder(hostArgs);
         configure?.Invoke(builder);
 
+        bool streaming = options.Strategy == OptimizedSettlementFileGenerator.StrategyName;
+
         builder.AddServiceDefaults();
         builder.AddNpgsqlDbContext<LedgerReadDbContext>(
             LedgerConnectionName,
-            // Sorting a whole day of entries before the first row is returned can take longer than the 30 s default.
-            configureSettings: static settings => settings.CommandTimeout ??= (int)RunCommandTimeout.TotalSeconds);
-        builder.Services.AddScoped<ISettlementFileGenerator, NaiveSettlementFileGenerator>();
+            configureSettings: settings =>
+            {
+                // Sorting a whole day of entries before the first row is returned can take longer than the 30 s default.
+                settings.CommandTimeout ??= (int)RunCommandTimeout.TotalSeconds;
+
+                // With a retrying execution strategy EF Core buffers every result set before returning its first row,
+                // which defeats streaming; the naive strategy keeps the retries it was measured with.
+                if (streaming)
+                {
+                    settings.DisableRetry = true;
+                }
+            });
+        if (streaming)
+        {
+            builder.Services.AddScoped<SettlementPageReader>();
+            builder.Services.AddScoped<ISettlementFileGenerator, OptimizedSettlementFileGenerator>();
+        }
+        else
+        {
+            builder.Services.AddScoped<ISettlementFileGenerator, NaiveSettlementFileGenerator>();
+        }
+
         builder.Services.AddScoped<RunCommand>();
 
         using IHost host = builder.Build();

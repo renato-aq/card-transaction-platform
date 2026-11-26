@@ -172,6 +172,78 @@ public sealed class JobCommandLineTests
         Assert.False(string.IsNullOrWhiteSpace(error));
     }
 
+    [Fact]
+    public void A_run_without_strategy_or_page_size_uses_the_optimized_strategy_and_the_default_page_size()
+    {
+        RunOptions? options = JobCommandLine.Parse(["run"], Yesterday, out _)?.Run;
+
+        Assert.Equal("optimized", options?.Strategy);
+        Assert.Equal(10_000, options?.PageSize);
+        Assert.Equal(RunOptions.DefaultPageSize, options?.PageSize);
+    }
+
+    [Theory]
+    [InlineData("run", "--strategy", "naive", "--page-size", "250")]
+    [InlineData("run", "--strategy=naive", "--page-size=250")]
+    [InlineData("--strategy", "naive", "--page-size", "250")]
+    [InlineData("--page-size=250", "--strategy=naive")]
+    public void Strategy_and_page_size_are_read_in_both_forms_with_and_without_the_run_word(params string[] args)
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(args, Yesterday, out string? error);
+
+        Assert.Null(error);
+        Assert.NotNull(commandLine);
+        Assert.Equal(JobCommand.Run, commandLine.Command);
+        Assert.Empty(commandLine.HostArgs);
+        Assert.Equal(
+            new RunOptions(Yesterday, "BRL", "settlement-files", Strategy: "naive", PageSize: 250),
+            commandLine.Run);
+    }
+
+    [Theory]
+    [InlineData("naive")]
+    [InlineData("optimized")]
+    public void Both_strategies_are_accepted(string strategy)
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(["run", "--strategy", strategy], Yesterday, out string? error);
+
+        Assert.Null(error);
+        Assert.Equal(strategy, commandLine?.Run?.Strategy);
+    }
+
+    [Theory]
+    [InlineData("run", "--strategy")]
+    [InlineData("run", "--strategy", "fast")]
+    [InlineData("run", "--strategy", "Naive")]
+    [InlineData("run", "--strategy", " ")]
+    [InlineData("--strategy=")]
+    [InlineData("--strategy", "parallel")]
+    [InlineData("run", "--page-size")]
+    [InlineData("run", "--page-size", "0")]
+    [InlineData("run", "--page-size", "-5")]
+    [InlineData("run", "--page-size", "many")]
+    [InlineData("run", "--page-size", "1.5")]
+    [InlineData("run", "--page-size", "99999999999")]
+    [InlineData("--page-size=0")]
+    [InlineData("--page-size", " 10")]
+    public void Invalid_strategy_or_page_size_is_rejected_with_an_error(params string[] args)
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(args, Yesterday, out string? error);
+
+        Assert.Null(commandLine);
+        Assert.False(string.IsNullOrWhiteSpace(error));
+    }
+
+    [Theory]
+    [InlineData("run", "--strategy", "fast")]
+    [InlineData("--page-size", "0")]
+    public async Task An_invalid_strategy_or_page_size_exits_with_the_invalid_arguments_code(params string[] args)
+    {
+        int exitCode = await SettlementJobHost.RunAsync(args);
+
+        Assert.Equal(ExitCodes.InvalidArguments, exitCode);
+    }
+
     [Theory]
     [InlineData("settle")]
     [InlineData("seed", "--transactions")]

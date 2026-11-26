@@ -10,9 +10,33 @@ namespace CardPlatform.Settlement.Job.Generation;
 /// File to write the metrics of the run to, as JSON (<see cref="Measurement.RunMetrics"/>), or <see langword="null"/>
 /// to only log them; a relative path is resolved against the working directory.
 /// </param>
-public sealed record RunOptions(DateOnly Date, string Currency, string OutputDirectory, string? MetricsOutputPath = null)
+/// <param name="Strategy">
+/// Name of the <see cref="ISettlementFileGenerator"/> that writes the file: <c>optimized</c>
+/// (<see cref="OptimizedSettlementFileGenerator"/>, the default) or <c>naive</c> (<see cref="NaiveSettlementFileGenerator"/>,
+/// the baseline). Both write the same file.
+/// </param>
+/// <param name="PageSize">
+/// Records read per query by the <c>optimized</c> strategy (keyset pagination); the <c>naive</c> strategy reads the day in
+/// one query and ignores it.
+/// </param>
+public sealed record RunOptions(
+    DateOnly Date,
+    string Currency,
+    string OutputDirectory,
+    string? MetricsOutputPath = null,
+    string Strategy = RunOptions.DefaultStrategy,
+    int PageSize = RunOptions.DefaultPageSize)
 {
     public const string DefaultCurrency = "BRL";
+
+    /// <summary>The strategy of a run that does not choose one: the streaming version.</summary>
+    public const string DefaultStrategy = OptimizedSettlementFileGenerator.StrategyName;
+
+    /// <summary>
+    /// The page size of a run that does not choose one. Measured on a seeded day of 500,000 records: larger pages gain
+    /// little time, and each page costs one query and keeps up to this many records in flight in the database driver.
+    /// </summary>
+    public const int DefaultPageSize = 10_000;
 
     /// <summary>
     /// Relative to the working directory, which is the project directory when the AppHost starts the job, so the files
@@ -29,6 +53,8 @@ public sealed record RunOptions(DateOnly Date, string Currency, string OutputDir
           --output <dir>      output directory (default settlement-files, under the working directory)
           --metrics-output <file>
                               also write the metrics of the run to this JSON file (default: only logged)
+          --strategy <name>   optimized (streaming, the default) or naive (version 1, the baseline)
+          --page-size <n>     records per query of the optimized strategy (default 10000)
         """;
 
     private const string DateFormat = "yyyy-MM-dd";
@@ -87,6 +113,10 @@ public sealed record RunOptions(DateOnly Date, string Currency, string OutputDir
                 "currency" => IsCurrencyCode(value) ? options with { Currency = value } : null,
                 "output" => string.IsNullOrWhiteSpace(value) ? null : options with { OutputDirectory = value },
                 "metrics-output" => string.IsNullOrWhiteSpace(value) ? null : options with { MetricsOutputPath = value },
+                "strategy" => IsStrategy(value) ? options with { Strategy = value } : null,
+                "page-size" => int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int pageSize) && pageSize > 0
+                    ? options with { PageSize = pageSize }
+                    : null,
                 _ => null,
             };
 
@@ -107,7 +137,7 @@ public sealed record RunOptions(DateOnly Date, string Currency, string OutputDir
 
     /// <summary>
     /// Whether <paramref name="arg"/> is one of the options of <see cref="Parse"/> (<c>--date</c>, <c>--currency</c>,
-    /// <c>--output</c>, <c>--metrics-output</c>), in either form: <c>--name</c> or <c>--name=value</c>.
+    /// <c>--output</c>, <c>--metrics-output</c>, <c>--strategy</c>, <c>--page-size</c>), in either form: <c>--name</c> or <c>--name=value</c>.
     /// </summary>
     public static bool IsOption(string arg)
     {
@@ -125,7 +155,12 @@ public sealed record RunOptions(DateOnly Date, string Currency, string OutputDir
 
     private static bool IsOptionName(string name)
     {
-        return name is "date" or "currency" or "output" or "metrics-output";
+        return name is "date" or "currency" or "output" or "metrics-output" or "strategy" or "page-size";
+    }
+
+    private static bool IsStrategy(string value)
+    {
+        return value is NaiveSettlementFileGenerator.StrategyName or OptimizedSettlementFileGenerator.StrategyName;
     }
 
     // Same rule as the ledger: exactly three uppercase ASCII letters.

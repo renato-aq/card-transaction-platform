@@ -6,8 +6,8 @@ namespace CardPlatform.Settlement.Job.Generation;
 
 /// <summary>
 /// Writes one settlement file, shared by every <see cref="ISettlementFileGenerator"/>: the header on creation, one detail
-/// per <see cref="WriteAsync"/> (numbered from 1 in the order written, and added to the trailer), and the trailer on
-/// <see cref="CompleteAsync"/>.
+/// per record given to <see cref="WriteAsync"/> or <see cref="WriteBatchAsync"/> (numbered from 1 in the order written,
+/// and added to the trailer), and the trailer on <see cref="CompleteAsync"/>.
 /// </summary>
 /// <remarks>
 /// The file is written under a temporary name in the output directory and moved to its final name
@@ -18,11 +18,20 @@ namespace CardPlatform.Settlement.Job.Generation;
 /// </remarks>
 public sealed class SettlementFileWriter : IAsyncDisposable
 {
+    /// <summary>
+    /// Detail lines formatted into one buffer and written to the file at once by <see cref="WriteBatchAsync"/>: about
+    /// 59 KiB, so a batch is a single write that bypasses the stream's own small buffer.
+    /// </summary>
+    public const int BatchLines = 512;
+
     private readonly SettlementLineFormatter _formatter;
 
     private readonly FileStream _stream;
 
     private readonly byte[] _line = new byte[SettlementFileLayout.LineLength];
+
+    // Allocated by the first batch, so a writer that only writes line by line never holds it.
+    private byte[]? _batch;
 
     private readonly string _temporaryPath;
 
@@ -93,15 +102,33 @@ public sealed class SettlementFileWriter : IAsyncDisposable
     {
         ThrowIfFinished();
 
-        SettlementDetail detail = new(
-            _trailer.DetailCount + 1,
-            record.TransactionId,
-            record.MerchantAccountId,
-            record.Amount,
-            record.TransactedAt);
+        SettlementDetail detail = ToDetail(_trailer.DetailCount + 1, record);
         int length = _formatter.WriteDetail(detail, _line);
         await _stream.WriteAsync(_line.AsMemory(0, length), cancellationToken).ConfigureAwait(false);
         _trailer = _trailer.Add(detail);
+    }
+
+    /// <summary>
+    /// Writes the next detail lines, one per record and in their order, and adds them to the trailer: the same lines as
+    /// one <see cref="WriteAsync"/> per record, formatted into a buffer of up to <see cref="BatchLines"/> lines that is
+    /// written to the file at once.
+    /// </summary>
+    public async Task WriteBatchAsync(IReadOnlyList<SettlementRecord> records, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(records);
+        ThrowIfFinished();
+
+        _batch ??= new byte[BatchLines * SettlementFileLayout.LineLength];
+        for (int start = 0; start < records.Count; start += BatchLines)
+        {
+            int count = Math.Min(BatchLines, records.Count - start);
+
+            // Only a buffer formatted completely is written: the formatter may leave partial bytes when it throws.
+            SettlementTrailer trailer = FormatDetails(records, start, count, _batch);
+            await _stream.WriteAsync(_batch.AsMemory(0, count * SettlementFileLayout.LineLength), cancellationToken)
+                .ConfigureAwait(false);
+            _trailer = trailer;
+        }
     }
 
     /// <summary>
@@ -136,6 +163,31 @@ public sealed class SettlementFileWriter : IAsyncDisposable
         {
             File.Delete(_temporaryPath);
         }
+    }
+
+    private static SettlementDetail ToDetail(long sequenceNumber, SettlementRecord record)
+    {
+        return new SettlementDetail(
+            sequenceNumber,
+            record.TransactionId,
+            record.MerchantAccountId,
+            record.Amount,
+            record.TransactedAt);
+    }
+
+    // Formats records[start..start + count) into consecutive lines of the buffer, numbered after the details written so
+    // far, and returns the trailer including them.
+    private SettlementTrailer FormatDetails(IReadOnlyList<SettlementRecord> records, int start, int count, Span<byte> buffer)
+    {
+        SettlementTrailer trailer = _trailer;
+        for (int index = 0; index < count; index++)
+        {
+            SettlementDetail detail = ToDetail(trailer.DetailCount + 1, records[start + index]);
+            _formatter.WriteDetail(detail, buffer[(index * SettlementFileLayout.LineLength)..]);
+            trailer = trailer.Add(detail);
+        }
+
+        return trailer;
     }
 
     private void ThrowIfFinished()
