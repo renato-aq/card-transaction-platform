@@ -29,7 +29,8 @@ namespace CardPlatform.Messaging.Kafka;
 /// expires, so a retired producer is disposed at the latest that long after its fatal error.
 /// </para>
 /// <para>
-/// On <see cref="Dispose"/> (host shutdown, after the hosted services stopped) no new send is accepted, and every
+/// On <see cref="Dispose"/> (host shutdown, after the hosted services stopped) no new send is accepted (it throws
+/// <see cref="ObjectDisposedException"/>, which the callers, already cancelled by then, treat as stopping), and every
 /// producer, current or retired, is disposed as soon as no send is in flight on it: at once when idle, which is the
 /// normal case at shutdown, or when its last send completes (cancelled with the host or failed by the delivery timeout).
 /// Disposing a producer under a send would crash the process instead of letting the host stop cleanly.

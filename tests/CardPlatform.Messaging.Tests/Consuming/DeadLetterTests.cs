@@ -27,6 +27,7 @@ public sealed class DeadLetterTests(MessagingFixture fixture) : IAsyncLifetime
     private const int DeadLetteredLogId = 120;
     private const int DeadLetterFailedLogId = 121;
     private const int ProcessingFailedLogId = 112;
+    private const int DeadLetterSkippedAtShutdownLogId = 119;
 
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 
@@ -321,6 +322,45 @@ public sealed class DeadLetterTests(MessagingFixture fixture) : IAsyncLifetime
 
         ConsumeResult<string, byte[]> deadLetter = Assert.Single(await fixture.ConsumeAsync(Topics.DeadLetterOf(topic), 1));
         Assert.Equal(invalid, deadLetter.Message.Value);
+    }
+
+    [Fact]
+    public async Task A_dead_letter_send_after_the_producer_was_disposed_at_shutdown_stops_the_consumer_without_committing()
+    {
+        string topic = await fixture.CreateTopicAsync(partitions: 1);
+        string groupId = NewGroupId();
+        EventEnvelope rejected = MessagingFixture.NewEnvelope(Guid.NewGuid());
+        await fixture.ProduceAsync(topic, rejected.PartitionKey, EventSerializer.SerializeToUtf8Bytes(rejected));
+
+        LogCapture logs = new();
+        using IHost host = fixture.CreateConsumerHost(topic, groupId, logs: logs);
+        HandlerProbe probe = host.Services.GetRequiredService<HandlerProbe>();
+        TaskCompletionSource handling = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TaskCompletionSource release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        probe.OnHandle = async _ =>
+        {
+            handling.SetResult();
+            await release.Task;
+            throw new IntegrationEventRejectedException("Invalid currency.");
+        };
+
+        await host.StartAsync();
+        await handling.Task.WaitAsync(Timeout);
+
+        // The host stops while the message is being processed, and its shutdown timeout expires: the container disposes
+        // the shared producer before the handler fails and the consumer tries to dead-letter the message.
+        Task stopping = host.StopAsync();
+        host.Services.GetRequiredService<KafkaProducerProvider>().Dispose();
+        release.SetResult();
+        await stopping.WaitAsync(Timeout);
+
+        IntegrationEventConsumer<TestOutboxDbContext> consumer =
+            host.Services.GetServices<IHostedService>().OfType<IntegrationEventConsumer<TestOutboxDbContext>>().Single();
+        Assert.True(consumer.ExecuteTask!.IsCompletedSuccessfully);
+        Assert.DoesNotContain(logs.Entries, static entry => entry.Level >= LogLevel.Error);
+        Assert.Single(logs.Entries, static entry => entry.EventId == DeadLetterSkippedAtShutdownLogId);
+        Assert.Equal(Offset.Unset.Value, CommittedOffset(groupId, topic));
+        Assert.Equal(0, fixture.CountMessages(Topics.DeadLetterOf(topic)));
     }
 
     private static Dictionary<string, string?> MaxAttempts(int value)

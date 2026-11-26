@@ -85,6 +85,12 @@ internal static partial class ConsumerLog
     public static partial void Recovered(ILogger logger, string topic, int partition, long offset, int failedAttempts);
 
     [LoggerMessage(
+        EventId = 119,
+        Level = LogLevel.Debug,
+        Message = "Stopping before message {Topic} [{Partition}] @{Offset} was sent to its dead-letter topic (the producer is already disposed); it stays uncommitted and is delivered again.")]
+    public static partial void DeadLetterSkippedAtShutdown(ILogger logger, string topic, int partition, long offset);
+
+    [LoggerMessage(
         EventId = 120,
         Level = LogLevel.Error,
         Message = "Message {Topic} [{Partition}] @{Offset} (event {EventId}, type {EventType}) was sent to {DeadLetterTopic} after {Attempts} attempt(s) ({FailureKind}): {Reason}")]

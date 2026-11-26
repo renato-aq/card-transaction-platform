@@ -29,7 +29,8 @@ namespace CardPlatform.Messaging.Consuming;
 /// attempt left, sends the message to its dead-letter topic (<c>&lt;topic&gt;.dlt</c>) with
 /// <see cref="KafkaDeadLetterProducer"/> and, once the broker acknowledged it, commits its offset, so the partition
 /// moves on in order. If that send fails, nothing is committed and the send is retried after a backoff: a message is
-/// never lost.
+/// never lost. A send attempted while the host stops, after the shared producer was disposed, stops the consumer
+/// the same way, without committing the message.
 /// </remarks>
 public sealed class IntegrationEventConsumer<TDbContext>(
     IConsumer<string, byte[]> consumer,
@@ -200,6 +201,13 @@ public sealed class IntegrationEventConsumer<TDbContext>(
         }
         catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
+            return false;
+        }
+        catch (ObjectDisposedException) when (stoppingToken.IsCancellationRequested)
+        {
+            // Stopping, and the host already disposed the shared producer (its shutdown timeout expired): as when
+            // cancelled, nothing is committed, so the message is delivered again on the next run.
+            ConsumerLog.DeadLetterSkippedAtShutdown(logger, result.Topic, result.Partition.Value, result.Offset.Value);
             return false;
         }
         catch (KafkaException sendException)

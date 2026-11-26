@@ -106,6 +106,11 @@ public sealed class OutboxBatchPublisher<TDbContext>(
                 // Stopping: the row stays unpublished (it may still reach the broker and be published again later).
                 break;
             }
+            catch (ObjectDisposedException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Stopping, and the host already disposed the shared producer: the row stays unpublished, as above.
+                break;
+            }
 #pragma warning disable CA1031 // Any failure stops the cycle; the row is retried later with backoff.
             catch (Exception exception)
 #pragma warning restore CA1031
