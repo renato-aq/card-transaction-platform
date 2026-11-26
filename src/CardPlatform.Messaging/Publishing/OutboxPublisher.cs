@@ -1,5 +1,3 @@
-using Confluent.Kafka;
-
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -12,13 +10,13 @@ namespace CardPlatform.Messaging.Publishing;
 /// runs <see cref="OutboxBatchPublisher{TDbContext}"/> cycles back to back while full batches succeed, waits
 /// <see cref="OutboxPublisherOptions.PollingInterval"/> when the outbox is drained or another instance is publishing,
 /// and backs off exponentially (bounded) after failures, without ever stopping on them: when the broker or the
-/// database comes back, the next cycle publishes what waited.
+/// database comes back, the next cycle publishes what waited. A fatal producer error is one of these failures: the
+/// producer is replaced (<see cref="Kafka.KafkaProducerProvider"/>) and the next cycle sends through the new one.
 /// </summary>
 public sealed class OutboxPublisher<TDbContext>(
     OutboxBatchPublisher<TDbContext> batchPublisher,
     IOptions<OutboxPublisherOptions> options,
     TimeProvider timeProvider,
-    IHostApplicationLifetime lifetime,
     ILogger<OutboxPublisher<TDbContext>> logger) : BackgroundService
     where TDbContext : DbContext
 {
@@ -52,14 +50,6 @@ public sealed class OutboxPublisher<TDbContext>(
                 }
                 else
                 {
-                    if (result.Failure is KafkaException { Error.IsFatal: true })
-                    {
-                        // A fatal error leaves the (singleton) producer unusable; a restart creates a new one.
-                        OutboxLog.FatalProducerError(logger, result.Failure);
-                        lifetime.StopApplication();
-                        return;
-                    }
-
                     consecutiveFailures++;
                     delay = OutboxRetryDelay.For(consecutiveFailures, _options);
                     OutboxLog.CycleFailed(logger, result.Failure, dbContextName, consecutiveFailures, delay);

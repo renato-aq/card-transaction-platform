@@ -9,12 +9,12 @@ namespace CardPlatform.Messaging.Kafka;
 
 /// <summary>
 /// Sends a message the integration event consumer gave up on to the dead-letter topic of its topic
-/// (<see cref="Topics.DeadLetterOf"/>, ADR 0011), with the producer registered by the Aspire integration (idempotent,
-/// <c>acks=all</c>, see <see cref="KafkaProducerDefaults"/>): the original key and value, byte for byte (so a malformed
-/// value is kept as it arrived), the original headers, and the error headers of <see cref="DeadLetterHeaders"/>, whose
-/// reason and exception type come from <see cref="CauseOf"/>.
+/// (<see cref="Topics.DeadLetterOf"/>, ADR 0011), with the producer of <see cref="KafkaProducerProvider"/>, shared with the
+/// outbox publisher (idempotent, <c>acks=all</c>, see <see cref="KafkaProducerDefaults"/>; replaced after a fatal error):
+/// the original key and value, byte for byte (so a malformed value is kept as it arrived), the original headers, and the
+/// error headers of <see cref="DeadLetterHeaders"/>, whose reason and exception type come from <see cref="CauseOf"/>.
 /// </summary>
-public sealed class KafkaDeadLetterProducer(IProducer<string, byte[]> producer, string consumerGroup, TimeProvider timeProvider)
+public sealed class KafkaDeadLetterProducer(KafkaProducerProvider producer, string consumerGroup, TimeProvider timeProvider)
 {
     /// <summary>The consumer group written to <see cref="DeadLetterHeaders.ConsumerGroup"/>.</summary>
     public string ConsumerGroup { get; } = consumerGroup;

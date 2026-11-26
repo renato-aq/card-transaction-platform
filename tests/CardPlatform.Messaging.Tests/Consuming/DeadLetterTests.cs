@@ -10,6 +10,7 @@ using Confluent.Kafka;
 
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -290,17 +291,18 @@ public sealed class DeadLetterTests(MessagingFixture fixture) : IAsyncLifetime
         await fixture.ProduceAsync(topic, "card", invalid);
 
         // A producer that cannot reach any broker: every send to the dead-letter topic times out.
-        using (IProducer<string, byte[]> unreachable = new ProducerBuilder<string, byte[]>(new ProducerConfig
-        {
-            BootstrapServers = "127.0.0.1:1",
-            MessageTimeoutMs = 300,
-        }).Build())
         {
             LogCapture logs = new();
             using IHost host = fixture.CreateConsumerHost(
                 topic,
                 groupId,
-                services => services.AddSingleton(unreachable),
+                services => services.Replace(ServiceDescriptor.Singleton(serviceProvider => new KafkaProducerProvider(
+                    static () => new ProducerBuilder<string, byte[]>(new ProducerConfig
+                    {
+                        BootstrapServers = "127.0.0.1:1",
+                        MessageTimeoutMs = 300,
+                    }).Build(),
+                    serviceProvider.GetRequiredService<ILogger<KafkaProducerProvider>>()))),
                 logs);
             await host.StartAsync();
             await WaitForAsync(() => Task.FromResult(logs.Entries.Count(static entry => entry.EventId == DeadLetterFailedLogId) >= 2));

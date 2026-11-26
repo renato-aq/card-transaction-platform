@@ -26,6 +26,7 @@ public sealed class OutboxPublisherSwitchTests(AuthorizationApiFactory factory)
 
         Assert.DoesNotContain(hostedServices, service => service is OutboxPublisher<AuthorizationDbContext>);
         Assert.DoesNotContain(hostedServices, service => service is KafkaTopicInitializer);
+        Assert.Null(factory.Services.GetService<KafkaProducerProvider>());
         Assert.Null(factory.Services.GetService<IProducer<string, byte[]>>());
     }
 

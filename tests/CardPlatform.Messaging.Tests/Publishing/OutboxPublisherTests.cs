@@ -13,6 +13,7 @@ using Confluent.Kafka;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace CardPlatform.Messaging.Tests.Publishing;
 
@@ -22,6 +23,8 @@ namespace CardPlatform.Messaging.Tests.Publishing;
 [Collection(MessagingCollectionFixture.Name)]
 public sealed class OutboxPublisherTests(MessagingFixture fixture) : IAsyncLifetime
 {
+    private const int ProducerReplacedLogId = 5;
+
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
 
     public Task InitializeAsync()
@@ -156,7 +159,7 @@ public sealed class OutboxPublisherTests(MessagingFixture fixture) : IAsyncLifet
         GatedProducer gate = new();
         using IHost first = fixture.CreatePublisherHost(services => services.Replace(
             ServiceDescriptor.Singleton<IOutboxMessageProducer>(serviceProvider =>
-                gate.Wrap(new KafkaOutboxMessageProducer(serviceProvider.GetRequiredService<IProducer<string, byte[]>>())))));
+                gate.Wrap(new KafkaOutboxMessageProducer(serviceProvider.GetRequiredService<KafkaProducerProvider>())))));
         using IHost second = fixture.CreatePublisherHost();
         OutboxBatchPublisher<TestOutboxDbContext> firstPublisher =
             first.Services.GetRequiredService<OutboxBatchPublisher<TestOutboxDbContext>>();
@@ -221,6 +224,41 @@ public sealed class OutboxPublisherTests(MessagingFixture fixture) : IAsyncLifet
         rows = await fixture.ReadOutboxAsync();
         Assert.All(rows, row => Assert.NotNull(row.PublishedAt));
         Assert.Equal([1, 2, 1], rows.Select(row => row.Attempts));
+    }
+
+    [Fact]
+    public async Task A_fatal_producer_error_replaces_the_producer_without_stopping_the_host_and_publishing_resumes()
+    {
+        List<OutboxMessage> written = await fixture.WriteEventsAsync("unused-topic", Guid.NewGuid(), Guid.NewGuid());
+        (IProducer<string, byte[]> broken, FakeProducer brokenFake) = FakeProducer.Fatal("broken");
+        (IProducer<string, byte[]> working, FakeProducer workingFake) = FakeProducer.Working("working");
+        Queue<IProducer<string, byte[]>> producers = new([broken, working]);
+        LogCapture logs = new();
+        using IHost host = fixture.CreatePublisherHost(services =>
+        {
+            services.AddLogging(logging => logging.AddProvider(logs));
+            services.Replace(ServiceDescriptor.Singleton(serviceProvider => new KafkaProducerProvider(
+                producers.Dequeue,
+                serviceProvider.GetRequiredService<ILogger<KafkaProducerProvider>>())));
+        });
+        IHostApplicationLifetime lifetime = host.Services.GetRequiredService<IHostApplicationLifetime>();
+
+        await host.StartAsync();
+        List<OutboxMessage> rows =
+            await fixture.WaitForOutboxAsync(rows => rows.All(r => r.PublishedAt is not null), Timeout);
+        bool stoppedByPublisher = lifetime.ApplicationStopping.IsCancellationRequested;
+        await host.StopAsync();
+
+        Assert.False(stoppedByPublisher);
+        Assert.True(brokenFake.Disposed);
+        Assert.Equal([written[0].PartitionKey], brokenFake.Sent.Select(static message => message.Key));
+
+        // The failed row was sent again, once, by the new producer, and the later row did not overtake it.
+        Assert.Equal(
+            written.Select(static message => message.EventId),
+            workingFake.Sent.Select(static message => EventSerializer.Deserialize(message.Value).EventId));
+        Assert.Equal([2, 1], rows.Select(static row => row.Attempts));
+        Assert.Contains(logs.Entries, static entry => entry.EventId == ProducerReplacedLogId);
     }
 
     private static string Header(ConsumeResult<string, byte[]> result, string name)

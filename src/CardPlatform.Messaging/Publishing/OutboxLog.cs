@@ -41,9 +41,9 @@ internal static partial class OutboxLog
 
     [LoggerMessage(
         EventId = 5,
-        Level = LogLevel.Critical,
-        Message = "The Kafka producer hit a fatal error and cannot publish anymore; stopping the application so it is restarted.")]
-    public static partial void FatalProducerError(ILogger logger, Exception exception);
+        Level = LogLevel.Error,
+        Message = "The Kafka producer {Producer} hit a fatal error and cannot send anymore; it is disposed once no send uses it and the next send uses a new producer.")]
+    public static partial void ProducerReplaced(ILogger logger, Exception exception, string producer);
 
     [LoggerMessage(
         EventId = 6,

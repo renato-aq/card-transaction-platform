@@ -138,7 +138,7 @@ public static class MessagingHostingExtensions
 
         builder.Services.TryAddSingleton(TimeProvider.System);
         builder.Services.TryAddSingleton(serviceProvider => new KafkaDeadLetterProducer(
-            serviceProvider.GetRequiredService<IProducer<string, byte[]>>(),
+            serviceProvider.GetRequiredService<KafkaProducerProvider>(),
             effectiveGroupId,
             serviceProvider.GetRequiredService<TimeProvider>()));
         builder.Services.TryAddSingleton<IntegrationEventProcessor<TDbContext>>();
@@ -195,12 +195,12 @@ public static class MessagingHostingExtensions
     /// <summary>
     /// Registers the Kafka producer through the Aspire integration (connection string <paramref name="connectionName"/>,
     /// telemetry; its health check is off unless configured), idempotent with <c>acks=all</c>
-    /// (<see cref="KafkaProducerDefaults"/>), unless a producer is registered already: the outbox publisher and the
-    /// consumer's dead-letter topic share one.
+    /// (<see cref="KafkaProducerDefaults"/>), owned by <see cref="KafkaProducerProvider"/>, which replaces it after a
+    /// fatal error, unless it is registered already: the outbox publisher and the consumer's dead-letter topic share one.
     /// </summary>
     private static void AddKafkaProducerOnce(IHostApplicationBuilder builder, string connectionName)
     {
-        if (builder.Services.Any(static descriptor => descriptor.ServiceType == typeof(IProducer<string, byte[]>)))
+        if (builder.Services.Any(static descriptor => descriptor.ServiceType == typeof(KafkaProducerProvider)))
         {
             return;
         }
@@ -219,5 +219,21 @@ public static class MessagingHostingExtensions
                 settings.DisableHealthChecks = true;
             }
         });
+
+        // The integration registers the producer as a singleton built by its factory, which applies the bound settings
+        // and adds logging, metrics and tracing, and builds a new producer on each call. The provider takes that factory
+        // over, so a producer replaced after a fatal error is built the same way; the singleton is not registered.
+        ServiceDescriptor? registered = builder.Services.LastOrDefault(static descriptor =>
+            descriptor.ServiceType == typeof(IProducer<string, byte[]>) && !descriptor.IsKeyedService);
+        if (registered?.ImplementationFactory is not { } createProducer)
+        {
+            throw new InvalidOperationException("The Aspire Kafka integration did not register the producer through a factory.");
+        }
+
+        builder.Services.Remove(registered);
+
+        builder.Services.AddSingleton(serviceProvider => new KafkaProducerProvider(
+            () => (IProducer<string, byte[]>)createProducer(serviceProvider),
+            serviceProvider.GetRequiredService<ILogger<KafkaProducerProvider>>()));
     }
 }

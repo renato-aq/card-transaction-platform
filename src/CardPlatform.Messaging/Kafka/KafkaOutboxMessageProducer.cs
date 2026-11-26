@@ -10,11 +10,11 @@ using Confluent.Kafka;
 namespace CardPlatform.Messaging.Kafka;
 
 /// <summary>
-/// Publishes outbox rows with the Kafka producer registered by the Aspire integration (idempotent, <c>acks=all</c>, see
-/// <see cref="KafkaProducerDefaults"/>): key = partition key (the card id), value = the envelope as JSON written by
+/// Publishes outbox rows with the Kafka producer of <see cref="KafkaProducerProvider"/>, built by the Aspire integration
+/// (idempotent, <c>acks=all</c>, see <see cref="KafkaProducerDefaults"/>) and replaced after a fatal error: key = partition key (the card id), value = the envelope as JSON written by
 /// <see cref="EventSerializer"/>, headers = event id and type (<see cref="OutboxHeaders"/>).
 /// </summary>
-public sealed class KafkaOutboxMessageProducer(IProducer<string, byte[]> producer) : IOutboxMessageProducer
+public sealed class KafkaOutboxMessageProducer(KafkaProducerProvider producer) : IOutboxMessageProducer
 {
     public async Task ProduceAsync(OutboxMessage message, CancellationToken cancellationToken)
     {
