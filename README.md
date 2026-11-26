@@ -69,7 +69,7 @@ The Aspire dashboard URL is printed in the console. Kafka UI is available from t
 
 Run the tests (the Ledger and Authorization API integration tests use [Testcontainers](https://testcontainers.com/) to start a
 real PostgreSQL, so the container runtime must be running; the Authorization integration tests also run the real Ledger
-API in process, with its own database, and the outbox publisher, consumer and Fraud Worker tests also start a Kafka broker):
+API in process, with its own database, and the outbox publisher, consumer, Fraud Worker and end-to-end tests also start a Kafka broker):
 
 ```bash
 dotnet test
@@ -263,6 +263,11 @@ sequenceDiagram
   it published only after the broker acknowledged it. If Kafka is down, events wait in the outbox and are published,
   in order per card, when it is back. Delivery is at least once, so consumers deduplicate by event id. In Development
   the topics are created on startup (3 partitions each); `Messaging:Outbox:Enabled=false` turns publishing off.
+- **Fraud signals** ([ADR 0011](docs/adr/0011-consume-integration-events-idempotently.md)): the Authorization consumes
+  `fraud-signals` (consumer group `authorization-api`) and a `FraudSuspected` **blocks the card** through the same
+  idempotent block command, once per event id; its next purchases are declined with `card_blocked`. The suspicion
+  (rule and reason) is logged, and `GET /cards/{id}` is unchanged; a suspicion of an unknown card is logged and
+  skipped. `Messaging:Consumer:Enabled=false` turns consuming off.
 
 ## Fraud Worker
 
@@ -477,12 +482,13 @@ tests/
   CardPlatform.Ledger.Api.Tests/      Integration tests (WebApplicationFactory + Testcontainers PostgreSQL)
   CardPlatform.Authorization.Domain.Tests/
   CardPlatform.Authorization.Application.Tests/
-  CardPlatform.Authorization.Infrastructure.Tests/ Ledger client against a fake Ledger (retries, timeouts, circuit)
+  CardPlatform.Authorization.Infrastructure.Tests/ Ledger client against a fake Ledger (retries, timeouts, circuit), fraud signal handler
   CardPlatform.Authorization.Api.Tests/ Integration tests (WebApplicationFactory + Testcontainers PostgreSQL, Ledger API in process)
   CardPlatform.Fraud.Domain.Tests/
   CardPlatform.Fraud.Application.Tests/
   CardPlatform.Fraud.Worker.Tests/    Worker host against Testcontainers PostgreSQL and Kafka (migrations, idempotent consumption, fraud signals)
   CardPlatform.Messaging.Tests/       Outbox publisher and consumer against Testcontainers PostgreSQL and Kafka
+  CardPlatform.EndToEnd.Tests/        Authorization, Ledger and Fraud Worker in process against Testcontainers PostgreSQL and Kafka
 docs/adr/                             Architecture Decision Records
 ```
 
