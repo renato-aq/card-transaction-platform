@@ -93,3 +93,19 @@ only layer that may use `CardPlatform.Messaging`; the Worker remains the composi
 - A message that can never be processed blocks its partition, retried with backoff and logged as an error, until the
   dead-letter topic exists; other partitions keep flowing, slowed by the backoff of the shared loop.
 - `processed_messages` grows with every event; cleaning up old rows (older than the topic's retention) is not done yet.
+
+## Amendment (2026-11-26)
+
+The Authorization became the second consumer (spec 006 of the fraud task); the original text above is kept as it was
+written.
+
+- **The Authorization consumes `fraud-signals`** in its own consumer group, `authorization-api`, with its own
+  `processed_messages` table in `authorizationdb`. Its inbound adapter, `FraudSuspectedHandler` (an
+  `IIntegrationEventHandler<FraudSuspected>` in Infrastructure), sends the existing `BlockCard` command, which saves
+  through the scoped `AuthorizationDbContext`, so the block and the processed mark are committed in the consumer's
+  transaction. A suspicion of a card the Authorization does not know is logged as a warning and confirmed (marked, its
+  offset committed): there is nothing to block, and retrying it could never succeed. The suspicion's rule and reason
+  are only logged; the card's contract does not change.
+- **`Messaging:Consumer:Enabled`** (default `true`) turns the consumer off, as `Messaging:Outbox:Enabled` does the
+  publisher: `AddIntegrationEventConsumer` then registers nothing (no Kafka consumer, no background service) and the
+  events wait in Kafka. The Authorization's integration tests that run without a broker set both switches to `false`.
