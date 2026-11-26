@@ -56,6 +56,60 @@ public sealed class KafkaFixture : IAsyncLifetime
         await producer.ProduceAsync(topic, new Message<string, byte[]> { Key = key, Value = value });
     }
 
+    /// <summary>
+    /// Every message on <paramref name="topic"/> at this moment, read from the beginning of each partition to its end.
+    /// </summary>
+    public Task<List<Message<string, byte[]>>> ReadAllAsync(string topic)
+    {
+        return Task.Run(() =>
+        {
+            using IAdminClient admin = new AdminClientBuilder(new AdminClientConfig { BootstrapServers = BootstrapServers }).Build();
+            TopicPartition[] partitions =
+            [
+                .. admin.GetMetadata(topic, TimeSpan.FromSeconds(10)).Topics.Single().Partitions
+                    .Select(partition => new TopicPartition(topic, partition.PartitionId)),
+            ];
+
+            using IConsumer<string, byte[]> consumer = new ConsumerBuilder<string, byte[]>(new ConsumerConfig
+            {
+                BootstrapServers = BootstrapServers,
+                GroupId = "test-reader-" + Guid.NewGuid().ToString("N"),
+                EnableAutoCommit = false,
+                EnablePartitionEof = true,
+            }).Build();
+            consumer.Assign(partitions.Select(static partition => new TopicPartitionOffset(partition, Offset.Beginning)));
+
+            List<Message<string, byte[]>> messages = [];
+            HashSet<int> ended = [];
+            DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(30);
+            while (ended.Count < partitions.Length)
+            {
+                if (DateTime.UtcNow > deadline)
+                {
+                    throw new TimeoutException($"Could not read {topic} to its end.");
+                }
+
+                ConsumeResult<string, byte[]>? result = consumer.Consume(TimeSpan.FromMilliseconds(500));
+                if (result is null)
+                {
+                    continue;
+                }
+
+                if (result.IsPartitionEOF)
+                {
+                    ended.Add(result.Partition.Value);
+                }
+                else
+                {
+                    messages.Add(result.Message);
+                }
+            }
+
+            consumer.Close();
+            return messages;
+        });
+    }
+
     /// <summary>The total of the offsets committed by <paramref name="groupId"/> on <paramref name="topic"/>: how many messages it confirmed.</summary>
     public long CommittedCount(string groupId, string topic)
     {

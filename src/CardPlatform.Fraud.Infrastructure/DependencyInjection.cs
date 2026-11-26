@@ -2,13 +2,19 @@ using CardPlatform.Contracts;
 using CardPlatform.Contracts.Authorizations;
 using CardPlatform.Fraud.Application.Abstractions.Persistence;
 using CardPlatform.Fraud.Infrastructure.Consuming;
+using CardPlatform.Fraud.Domain.Rules;
 using CardPlatform.Fraud.Infrastructure.Persistence;
+using CardPlatform.Fraud.Infrastructure.Persistence.Outbox;
 using CardPlatform.Fraud.Infrastructure.Persistence.Repositories;
+using CardPlatform.Fraud.Infrastructure.Rules;
 using CardPlatform.Messaging;
+using CardPlatform.Messaging.Publishing;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace CardPlatform.Fraud.Infrastructure;
 
@@ -25,11 +31,14 @@ public static class DependencyInjection
 
     /// <summary>
     /// Registers the <see cref="FraudDbContext"/> through the Aspire PostgreSQL integration (connection string
-    /// <c>frauddb</c>, health check, retries, telemetry), the persistence adapters, and the consumer of the topic
-    /// <c>authorizations</c> (connection string <c>kafka</c>, consumer group <see cref="ConsumerGroupId"/>, ADR 0011),
-    /// which records every Authorization decision in the card's purchase history once per event id. In Development the
-    /// topic is created on startup if it does not exist yet, so the Fraud Worker does not depend on starting after the
-    /// Authorization.
+    /// <c>frauddb</c>, health check, retries, telemetry), the persistence adapters (including the outbox), the
+    /// <see cref="FraudRules"/> with the limits of <c>Fraud:Rules</c> (<see cref="FraudRulesOptions"/>, validated on
+    /// startup), the consumer of the topic <c>authorizations</c> (connection string <c>kafka</c>, consumer group
+    /// <see cref="ConsumerGroupId"/>, ADR 0011), which records every Authorization decision in the card's purchase
+    /// history once per event id, and the outbox publisher, which sends the <c>FraudSuspected</c> events to
+    /// <c>fraud-signals</c> (settings in <c>Messaging:Outbox</c>, ADR 0010; with <c>Messaging:Outbox:Enabled</c> set to
+    /// <see langword="false"/> they stay in the outbox). In Development the topics are created on startup if they do not
+    /// exist yet, so the Fraud Worker does not depend on starting after the Authorization.
     /// </summary>
     public static TBuilder AddFraudInfrastructure<TBuilder>(this TBuilder builder)
         where TBuilder : IHostApplicationBuilder
@@ -41,12 +50,23 @@ public static class DependencyInjection
             configureDbContextOptions: static options => FraudDbContextOptions.ApplyConventions(options));
 
         builder.Services.AddScoped<ICardPurchaseRepository, CardPurchaseRepository>();
+        builder.Services.AddScoped<IOutbox, EfOutbox>();
         builder.Services.AddScoped<IUnitOfWork>(static services => services.GetRequiredService<FraudDbContext>());
+        builder.Services.TryAddSingleton(TimeProvider.System);
+
+        builder.Services.AddOptions<FraudRulesOptions>()
+            .BindConfiguration(FraudRulesOptions.SectionName)
+            .Validate(static options => options.IsValid(), "Invalid fraud rule limits (Fraud:Rules).")
+            .ValidateOnStart();
+        builder.Services.AddSingleton(static services =>
+            services.GetRequiredService<IOptions<FraudRulesOptions>>().Value.ToRules());
+
+        bool publishes = OutboxPublisherOptions.IsEnabled(builder.Configuration);
 
         if (builder.Environment.IsDevelopment())
         {
-            // Registered first, so the topic exists before the consumer subscribes to it.
-            builder.AddKafkaTopicInitializer([Topics.Authorizations]);
+            // Registered first, so the topics exist before the consumer subscribes and the publisher publishes.
+            builder.AddKafkaTopicInitializer(publishes ? [Topics.Authorizations, Topics.FraudSignals] : [Topics.Authorizations]);
         }
 
         builder.AddIntegrationEventConsumer<FraudDbContext>(ConsumerGroupId, [Topics.Authorizations]);
@@ -54,6 +74,11 @@ public static class DependencyInjection
         builder.Services.AddIntegrationEventHandler<AuthorizationDeclined, AuthorizationDeclinedHandler>();
         builder.Services.AddIntegrationEventHandler<AuthorizationCaptured, AuthorizationCapturedHandler>();
         builder.Services.AddIntegrationEventHandler<AuthorizationVoided, AuthorizationVoidedHandler>();
+
+        if (publishes)
+        {
+            builder.AddOutboxPublisher<FraudDbContext>();
+        }
 
         return builder;
     }

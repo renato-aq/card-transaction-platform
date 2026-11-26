@@ -7,7 +7,8 @@ namespace CardPlatform.Fraud.Worker.Tests.Infrastructure;
 
 /// <summary>
 /// Builds the real Fraud Worker host (<see cref="FraudWorkerHost"/>) with the connection strings Aspire injects for
-/// <c>.WithReference(fraudDb)</c> and <c>.WithReference(kafka)</c>, optionally consuming a test topic in a given group.
+/// <c>.WithReference(fraudDb)</c> and <c>.WithReference(kafka)</c>, optionally consuming a test topic in a given group,
+/// with extra command-line <c>settings</c> (e.g. <c>--Fraud:Rules:Velocity:Threshold=2</c>).
 /// </summary>
 internal static class WorkerHosts
 {
@@ -17,7 +18,8 @@ internal static class WorkerHosts
         string environment,
         string? topic = null,
         string? groupId = null,
-        LogCapture? logs = null)
+        LogCapture? logs = null,
+        IEnumerable<string>? settings = null)
     {
         List<string> args =
         [
@@ -36,6 +38,11 @@ internal static class WorkerHosts
         if (groupId is not null)
         {
             args.Add($"--Aspire:Confluent:Kafka:Consumer:Config:GroupId={groupId}");
+        }
+
+        if (settings is not null)
+        {
+            args.AddRange(settings);
         }
 
         HostApplicationBuilder builder = FraudWorkerHost.CreateBuilder([.. args]);

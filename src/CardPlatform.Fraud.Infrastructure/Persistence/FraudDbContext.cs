@@ -1,6 +1,7 @@
 using CardPlatform.Fraud.Application.Abstractions.Persistence;
 using CardPlatform.Fraud.Domain.Purchases;
 using CardPlatform.Messaging.Consuming;
+using CardPlatform.Messaging.Outbox;
 
 using Microsoft.EntityFrameworkCore;
 
@@ -8,7 +9,8 @@ namespace CardPlatform.Fraud.Infrastructure.Persistence;
 
 /// <summary>
 /// EF Core context of the Fraud Worker. Mappings live in <c>IEntityTypeConfiguration</c> classes of this assembly,
-/// except the processed messages', shared through <c>CardPlatform.Messaging</c>; the domain model has no EF attributes.
+/// except the processed messages' and the outbox's, shared through <c>CardPlatform.Messaging</c>; the domain model has
+/// no EF attributes.
 /// </summary>
 public sealed class FraudDbContext(DbContextOptions<FraudDbContext> options) : DbContext(options), IUnitOfWork
 {
@@ -16,6 +18,9 @@ public sealed class FraudDbContext(DbContextOptions<FraudDbContext> options) : D
 
     /// <summary>The authorization events already processed (ADR 0011).</summary>
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
+
+    /// <summary>The fraud suspicions to publish on <c>fraud-signals</c> (ADR 0010).</summary>
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     async Task IUnitOfWork.SaveChangesAsync(CancellationToken cancellationToken)
     {
@@ -26,5 +31,6 @@ public sealed class FraudDbContext(DbContextOptions<FraudDbContext> options) : D
     {
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(FraudDbContext).Assembly);
         modelBuilder.ApplyProcessedMessages();
+        modelBuilder.ApplyOutbox();
     }
 }

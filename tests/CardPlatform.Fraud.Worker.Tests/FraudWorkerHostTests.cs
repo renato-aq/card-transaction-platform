@@ -4,6 +4,7 @@ using CardPlatform.Fraud.Worker.Tests.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 
 namespace CardPlatform.Fraud.Worker.Tests;
 
@@ -59,6 +60,22 @@ public sealed class FraudWorkerHostTests(PostgreSqlFixture postgres, KafkaFixtur
         {
             await host.StopAsync();
         }
+    }
+
+    [Theory]
+    [InlineData("--Fraud:Rules:Velocity:Threshold=1")]
+    [InlineData("--Fraud:Rules:Velocity:Window=00:00:00")]
+    [InlineData("--Fraud:Rules:AmountAboveAverage:Multiplier=1")]
+    [InlineData("--Fraud:Rules:AmountAboveAverage:MinimumHistory=0")]
+    public async Task Invalid_fraud_rule_limits_stop_the_host_from_starting(string setting)
+    {
+        string connectionString = await postgres.CreateDatabaseAsync();
+
+        using IHost host = WorkerHosts.Create(
+            connectionString, kafka.BootstrapServers, Environments.Production, settings: [setting]);
+
+        OptionsValidationException exception = await Assert.ThrowsAsync<OptionsValidationException>(() => host.StartAsync());
+        Assert.Contains("Fraud:Rules", exception.Message, StringComparison.Ordinal);
     }
 
     private static async Task<string[]> AppliedMigrationsAsync(IHost host)

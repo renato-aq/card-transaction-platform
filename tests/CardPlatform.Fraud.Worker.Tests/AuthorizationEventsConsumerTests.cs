@@ -1,16 +1,9 @@
-using System.Globalization;
 
 using CardPlatform.Contracts;
 using CardPlatform.Contracts.Authorizations;
-using CardPlatform.Fraud.Application.Abstractions.Persistence;
 using CardPlatform.Fraud.Domain.Purchases;
-using CardPlatform.Fraud.Infrastructure.Persistence;
 using CardPlatform.Fraud.Worker.Tests.Infrastructure;
 using CardPlatform.Messaging.Consuming;
-
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 
 namespace CardPlatform.Fraud.Worker.Tests;
 
@@ -22,8 +15,6 @@ namespace CardPlatform.Fraud.Worker.Tests;
 [Collection(WorkerCollectionFixture.Name)]
 public sealed class AuthorizationEventsConsumerTests(PostgreSqlFixture postgres, KafkaFixture kafka)
 {
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
-
     private static readonly DateTimeOffset AuthorizedAt = new(2026, 11, 25, 10, 0, 0, TimeSpan.Zero);
 
     [Fact]
@@ -64,7 +55,7 @@ public sealed class AuthorizationEventsConsumerTests(PostgreSqlFixture postgres,
         await kafka.PublishAsync(topic, envelope);
 
         await using RunningWorker worker = await RunningWorker.StartAsync(postgres, kafka, topic, groupId);
-        await WaitForAsync(() => Task.FromResult(kafka.CommittedCount(groupId, topic) == 2));
+        await RunningWorker.WaitForAsync(() => Task.FromResult(kafka.CommittedCount(groupId, topic) == 2));
 
         Assert.Equal(2, worker.Logs.ConsumedOffsets().Length);
         Assert.Single((await worker.HistoryAsync(cardId)).Purchases);
@@ -85,7 +76,7 @@ public sealed class AuthorizationEventsConsumerTests(PostgreSqlFixture postgres,
         await using (RunningWorker worker = await RunningWorker.StartAsync(database, kafka, topic, groupId))
         {
             await worker.WaitForHistoryAsync(cardId, static h => h.Purchases.Count == 1);
-            await WaitForAsync(() => Task.FromResult(kafka.CommittedCount(groupId, topic) == 1));
+            await RunningWorker.WaitForAsync(() => Task.FromResult(kafka.CommittedCount(groupId, topic) == 1));
         }
 
         AuthorizationApproved second = Approved(cardId, 20m, AuthorizedAt.AddMinutes(1));
@@ -93,7 +84,7 @@ public sealed class AuthorizationEventsConsumerTests(PostgreSqlFixture postgres,
 
         await using RunningWorker restarted = await RunningWorker.StartAsync(database, kafka, topic, groupId);
         CardHistory history = await restarted.WaitForHistoryAsync(cardId, static h => h.Purchases.Count == 2);
-        await WaitForAsync(() => Task.FromResult(kafka.CommittedCount(groupId, topic) == 2));
+        await RunningWorker.WaitForAsync(() => Task.FromResult(kafka.CommittedCount(groupId, topic) == 2));
 
         // The first message (offset 0) was confirmed, so the new consumer started after it: only the new one arrived.
         Assert.Equal([1L], restarted.Logs.ConsumedOffsets());
@@ -114,7 +105,7 @@ public sealed class AuthorizationEventsConsumerTests(PostgreSqlFixture postgres,
 
         await using RunningWorker worker = await RunningWorker.StartAsync(postgres, kafka, topic, groupId);
         await worker.WaitForHistoryAsync(cardId, static h => h.Purchases.Count == 1);
-        await WaitForAsync(() => Task.FromResult(kafka.CommittedCount(groupId, topic) == 2));
+        await RunningWorker.WaitForAsync(() => Task.FromResult(kafka.CommittedCount(groupId, topic) == 2));
 
         // Logged and ignored, not marked: a later version that knows the type can process it from a replay.
         ProcessedMessage processed = Assert.Single(await worker.ProcessedMessagesAsync());
@@ -145,7 +136,7 @@ public sealed class AuthorizationEventsConsumerTests(PostgreSqlFixture postgres,
         }
 
         await using RunningWorker worker = await RunningWorker.StartAsync(postgres, kafka, topic, NewGroupId());
-        await WaitForAsync(async () => (await worker.ProcessedMessagesAsync()).Count == events.Length);
+        await RunningWorker.WaitForAsync(async () => (await worker.ProcessedMessagesAsync()).Count == events.Length);
         CardHistory history = await worker.HistoryAsync(cardId);
 
         Assert.Equal(
@@ -168,85 +159,5 @@ public sealed class AuthorizationEventsConsumerTests(PostgreSqlFixture postgres,
     private static string NewGroupId()
     {
         return "fraud-worker-test-" + Guid.NewGuid().ToString("N");
-    }
-
-    private static async Task WaitForAsync(Func<Task<bool>> condition)
-    {
-        DateTime deadline = DateTime.UtcNow + Timeout;
-        while (!await condition())
-        {
-            if (DateTime.UtcNow > deadline)
-            {
-                Assert.Fail($"The condition was not met within {Timeout}.");
-            }
-
-            await Task.Delay(200);
-        }
-    }
-
-    /// <summary>A started worker host (Development, so it migrates its database), stopped when disposed.</summary>
-    private sealed class RunningWorker : IAsyncDisposable
-    {
-        private readonly IHost _host;
-
-        private RunningWorker(IHost host, LogCapture logs)
-        {
-            _host = host;
-            Logs = logs;
-        }
-
-        public LogCapture Logs { get; }
-
-        public static async Task<RunningWorker> StartAsync(PostgreSqlFixture postgres, KafkaFixture kafka, string topic, string groupId)
-        {
-            return await StartAsync(await postgres.CreateDatabaseAsync(), kafka, topic, groupId);
-        }
-
-        public static async Task<RunningWorker> StartAsync(string database, KafkaFixture kafka, string topic, string groupId)
-        {
-            LogCapture logs = new();
-            IHost host = WorkerHosts.Create(database, kafka.BootstrapServers, Environments.Development, topic, groupId, logs);
-            await FraudWorkerHost.InitializeAsync(host);
-            await host.StartAsync();
-            return new RunningWorker(host, logs);
-        }
-
-        public async Task<CardHistory> HistoryAsync(Guid cardId)
-        {
-            await using AsyncServiceScope scope = _host.Services.CreateAsyncScope();
-            return await scope.ServiceProvider.GetRequiredService<ICardPurchaseRepository>().GetHistoryAsync(cardId);
-        }
-
-        public async Task<CardHistory> WaitForHistoryAsync(Guid cardId, Func<CardHistory, bool> condition)
-        {
-            CardHistory history = await HistoryAsync(cardId);
-            DateTime deadline = DateTime.UtcNow + Timeout;
-            while (!condition(history))
-            {
-                if (DateTime.UtcNow > deadline)
-                {
-                    Assert.Fail(string.Create(
-                        CultureInfo.InvariantCulture,
-                        $"The history of card {cardId} did not reach the expected state within {Timeout} ({history.Purchases.Count} purchase(s))."));
-                }
-
-                await Task.Delay(200);
-                history = await HistoryAsync(cardId);
-            }
-
-            return history;
-        }
-
-        public async Task<List<ProcessedMessage>> ProcessedMessagesAsync()
-        {
-            await using AsyncServiceScope scope = _host.Services.CreateAsyncScope();
-            return await scope.ServiceProvider.GetRequiredService<FraudDbContext>().ProcessedMessages.AsNoTracking().ToListAsync();
-        }
-
-        public async ValueTask DisposeAsync()
-        {
-            await _host.StopAsync();
-            _host.Dispose();
-        }
     }
 }

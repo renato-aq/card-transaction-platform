@@ -16,13 +16,33 @@ internal static partial class AuthorizationEventRecording
     /// </summary>
     public static void Complete(Result<RecordingOutcome> result, EventEnvelope envelope, ILogger logger)
     {
+        ThrowIfRejected(result, envelope);
+
+        Recorded(logger, envelope.EventId, envelope.Type, result.Value);
+    }
+
+    /// <summary>
+    /// As <see cref="Complete(Result{RecordingOutcome}, EventEnvelope, ILogger)"/> for an approved purchase, and logs the
+    /// fraud suspicion it raised, if any.
+    /// </summary>
+    public static void Complete(Result<ApprovedPurchaseRecording> result, EventEnvelope envelope, ILogger logger)
+    {
+        ThrowIfRejected(result, envelope);
+
+        Recorded(logger, envelope.EventId, envelope.Type, result.Value.Outcome);
+        if (result.Value.Suspicion is { } suspicion)
+        {
+            FraudSuspected(logger, suspicion.CardId, suspicion.AuthorizationId, suspicion.Rule, suspicion.Reason);
+        }
+    }
+
+    private static void ThrowIfRejected(Result result, EventEnvelope envelope)
+    {
         if (result.IsFailure)
         {
             throw new IntegrationEventRejectedException(
                 $"Event {envelope.EventId} ({envelope.Type}) was rejected: {result.Error.Code}: {result.Error.Message}");
         }
-
-        Recorded(logger, envelope.EventId, envelope.Type, result.Value);
     }
 
     [LoggerMessage(
@@ -30,4 +50,10 @@ internal static partial class AuthorizationEventRecording
         Level = LogLevel.Debug,
         Message = "Event {EventId} ({EventType}) applied to the card's purchase history: {Outcome}.")]
     private static partial void Recorded(ILogger logger, Guid eventId, string eventType, RecordingOutcome outcome);
+
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Information,
+        Message = "Fraud suspected on card {CardId} for authorization {AuthorizationId} ({Rule}): {Reason}")]
+    private static partial void FraudSuspected(ILogger logger, Guid cardId, Guid authorizationId, string rule, string reason);
 }

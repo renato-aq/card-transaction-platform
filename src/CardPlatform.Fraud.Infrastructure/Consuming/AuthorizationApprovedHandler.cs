@@ -10,11 +10,12 @@ using Microsoft.Extensions.Logging;
 namespace CardPlatform.Fraud.Infrastructure.Consuming;
 
 /// <summary>
-/// Inbound adapter of <see cref="AuthorizationApproved"/>: records an approved purchase to its card's history through
-/// <see cref="RecordApprovedPurchase"/>. Called by the consumer once per event id, inside its transaction.
+/// Inbound adapter of <see cref="AuthorizationApproved"/>: records an approved purchase to its card's history, and
+/// judges it by the fraud rules, through <see cref="RecordApprovedPurchase"/>. Called by the consumer once per event id,
+/// inside its transaction, which also commits the <c>FraudSuspected</c> the purchase may have written to the outbox.
 /// </summary>
 internal sealed class AuthorizationApprovedHandler(
-    ICommandHandler<RecordApprovedPurchase, RecordingOutcome> recordPurchase,
+    ICommandHandler<RecordApprovedPurchase, ApprovedPurchaseRecording> recordPurchase,
     ILogger<AuthorizationApprovedHandler> logger) : IIntegrationEventHandler<AuthorizationApproved>
 {
     public async Task HandleAsync(
@@ -25,7 +26,7 @@ internal sealed class AuthorizationApprovedHandler(
         ArgumentNullException.ThrowIfNull(integrationEvent);
         ArgumentNullException.ThrowIfNull(envelope);
 
-        Result<RecordingOutcome> result = await recordPurchase.HandleAsync(
+        Result<ApprovedPurchaseRecording> result = await recordPurchase.HandleAsync(
             new RecordApprovedPurchase(
                 integrationEvent.AuthorizationId,
                 integrationEvent.CardId,
