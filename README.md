@@ -30,7 +30,7 @@ the merchant) or **voided** (the money goes back to the card) later; see [Author
 |---|---|
 | **Authorization API** | Approves or declines card purchases with low latency, idempotent by `Idempotency-Key`; captures and voids them |
 | **Ledger API** | Double-entry bookkeeping, balances and authorization holds; transactional outbox for events (planned) |
-| **Fraud Worker** | Consumes the authorization events idempotently into a purchase history per card; flags suspicious patterns (planned) |
+| **Fraud Worker** | Consumes the authorization events idempotently into a purchase history per card; flags suspicious purchases on `fraud-signals` |
 | **Settlement Job** | Generates the daily settlement file in batches from the ledger |
 
 Shared projects: `ServiceDefaults` (OpenTelemetry, health checks, resilience, service discovery), `Contracts`
@@ -267,12 +267,28 @@ sequenceDiagram
 ## Fraud Worker
 
 The Fraud Worker consumes the topic `authorizations` (consumer group `fraud-worker`) and records every decision in a
-purchase history per card in its own database (`frauddb`), the input of the fraud rules still to come. Each event is
+purchase history per card in its own database (`frauddb`), the input of the fraud rules. Each event is
 processed **once per event id**: the event id is written to `processed_messages` in the same transaction as the
 history, so a redelivered or duplicated event is skipped, and the Kafka offset is committed only after that
 transaction ([ADR 0011](docs/adr/0011-consume-integration-events-idempotently.md)). Event types it does not know are
 logged and ignored. It uses the same layering as the other services
 ([ADR 0004](docs/adr/0004-use-hexagonal-architecture-with-pragmatic-cqrs.md)), with `Fraud.Worker` as the host.
+
+Every newly recorded **approved** purchase is judged by two rules in the Fraud domain, against the card's history up
+to the purchase's own authorization time (not the processing time, so a replay judges it the same way):
+
+| Rule (`rule` code) | Fires when | Default (`Fraud:Rules`) |
+|---|---|---|
+| Velocity (`velocity`) | the card has N or more approved purchases, this one included, in `(t − window, t]` | `Velocity:Threshold=5`, `Velocity:Window=00:01:00` |
+| Amount above average (`amount_above_average`) | the amount is greater than X times the average of the card's previous approved purchases **in the same currency**, given at least M of them | `AmountAboveAverage:Multiplier=3`, `AmountAboveAverage:MinimumHistory=5` |
+
+Declined purchases never count; captured and voided ones count as approved. The limits are validated on startup. A
+purchase that fires any rule raises one `FraudSuspected` (card, authorization, rule, reason; both rules are joined as
+`velocity,amount_above_average` with both reasons), written to the Fraud Worker's `outbox_messages` in the same
+transaction as the purchase and the processed mark, and published on `fraud-signals` (key = card id) by the same
+outbox publisher as the Authorization's. Its event id is derived from the authorization id, and a purchase is judged
+only when its approval is first recorded, so an authorization raises at most one suspicion
+([ADR 0012](docs/adr/0012-judge-purchases-by-fraud-rules-at-approval.md)).
 
 ### When the Ledger is down
 
@@ -449,7 +465,7 @@ src/
   CardPlatform.Ledger.Application/    Ledger use cases (command/query handlers) and ports
   CardPlatform.Ledger.Infrastructure/ EF Core, PostgreSQL, migrations
   CardPlatform.Ledger.Api/            Ledger HTTP endpoints
-  CardPlatform.Fraud.Domain/         Fraud entities and invariants
+  CardPlatform.Fraud.Domain/         Fraud entities, invariants and fraud rules
   CardPlatform.Fraud.Application/    Fraud use cases and ports
   CardPlatform.Fraud.Infrastructure/ EF Core, PostgreSQL (frauddb), migrations, authorization event handlers
   CardPlatform.Fraud.Worker/         Fraud Worker host (composition root)
@@ -465,7 +481,7 @@ tests/
   CardPlatform.Authorization.Api.Tests/ Integration tests (WebApplicationFactory + Testcontainers PostgreSQL, Ledger API in process)
   CardPlatform.Fraud.Domain.Tests/
   CardPlatform.Fraud.Application.Tests/
-  CardPlatform.Fraud.Worker.Tests/    Worker host against Testcontainers PostgreSQL and Kafka (migrations, idempotent consumption)
+  CardPlatform.Fraud.Worker.Tests/    Worker host against Testcontainers PostgreSQL and Kafka (migrations, idempotent consumption, fraud signals)
   CardPlatform.Messaging.Tests/       Outbox publisher and consumer against Testcontainers PostgreSQL and Kafka
 docs/adr/                             Architecture Decision Records
 ```
