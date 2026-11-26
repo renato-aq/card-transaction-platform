@@ -109,3 +109,68 @@ written.
 - **`Messaging:Consumer:Enabled`** (default `true`) turns the consumer off, as `Messaging:Outbox:Enabled` does the
   publisher: `AddIntegrationEventConsumer` then registers nothing (no Kafka consumer, no background service) and the
   events wait in Kafka. The Authorization's integration tests that run without a broker set both switches to `false`.
+
+## Amendment (2026-11-25)
+
+Retries became bounded and a dead-letter topic was added (spec 007 of the fraud task), replacing "failures are retried,
+never skipped, for now"; the original text above is kept as it was written. It applies to every consumer built on
+`AddIntegrationEventConsumer` (the Fraud Worker on `authorizations`, the Authorization on `fraud-signals`).
+
+- **Failures are classified.** *Permanent*: the message is not a valid envelope or its payload does not match its type
+  (`JsonException`, including a null value), or the handler threw `IntegrationEventRejectedException` (its use case
+  rejected the data). Retrying cannot change the outcome, so it goes to the dead-letter topic after the first attempt.
+  *Temporary*: any other exception (the database down, a timeout, a handler bug). It is retried in process: the
+  consumer rewinds the partition to the message (`Seek`) and processes it again after an exponential backoff
+  (`RetryInitialDelay` 1 s, doubled up to `RetryMaxDelay` 30 s), before any later message of that partition, up to
+  `Messaging:Consumer:MaxAttempts` attempts (default 5, the first included), and then dead-letters it. An unknown event
+  type is still skipped, not dead-lettered: it is forward compatibility, not an error.
+- **Attempts are counted per message**, keyed by topic, partition and offset (`FailedMessageTracker`), no longer by a
+  loop-wide counter that any success reset: messages of other partitions processed between two retries no longer give
+  a failing message a fresh budget. A different offset at the head of the partition starts from zero. The counter
+  lives in memory: a restart or a rebalance gives the message a new budget, which errs on the side of retrying. The
+  backoff still pauses the whole loop (one consumer thread), so other partitions are slowed while a message waits for
+  its retry, as before.
+- **Dead-lettering.** The message goes to `Topics.DeadLetterOf(topic)` (`<topic>.dlt`, e.g. `authorizations.dlt`,
+  `fraud-signals.dlt`) through `KafkaDeadLetterProducer`, with the **original key and value byte for byte** (a malformed
+  value is kept as it arrived), the original headers (`event-id`, `event-type`, anything else), and error headers
+  (`DeadLetterHeaders`, UTF-8 text): `dlt-reason` (the exception's message, at most 1000 characters),
+  `dlt-exception-type`, `dlt-failure-kind` (`permanent` or `retries-exhausted`), `dlt-attempts`, `dlt-original-topic`,
+  `dlt-original-partition`, `dlt-original-offset`, `dlt-consumer-group` (the effective group, after configuration) and
+  `dlt-failed-at` (UTC, ISO 8601). Error headers already on a message replayed from a dead-letter topic are replaced, not
+  repeated. The send awaits the broker's acknowledgement (idempotent producer, `acks=all`); **only then is the original
+  offset committed** and the partition moves on. Every dead-lettered message is logged as an error (`ConsumerLog` event
+  120) with its topic, partition, offset, event id and type when known (from the headers, or from the envelope if it
+  parses), dead-letter topic, attempts, failure kind and reason.
+- **If the dead-letter send fails** (broker down, topic missing with auto-creation off), nothing is committed: the
+  consumer logs it (event 121), rewinds to the message and tries the send again after a backoff, without processing the
+  message again, for as long as it takes. No message is lost; the partition waits, as it did before this change. If the
+  offset commit after a successful send fails (a rebalance), the message is processed again by its next owner and may
+  be dead-lettered twice: the dead-letter topic is at least once too.
+- **A dead-lettered message is not marked as processed.** It is not written to `processed_messages` (the processor's
+  transaction rolled back, or never started), so replaying it later, once the cause is fixed, processes it normally;
+  dedup by event id still makes a replay of an event that did get processed harmless. Reprocessing is manual (re-produce
+  the dead-letter message's key and value to the original topic, e.g. from Kafka UI or a CLI, see the README); there is
+  no automatic reprocessing.
+- **One producer per service.** `AddIntegrationEventConsumer` registers the Aspire Kafka producer (`string`, `byte[]`,
+  `KafkaProducerDefaults`) unless `AddOutboxPublisher` already did, and vice versa, so a consumer can dead-letter even
+  with the outbox publisher disabled, and a service that does both shares one producer.
+- **Topics.** In Development each service also creates the dead-letter topic of the topic it consumes
+  (`authorizations.dlt` in the Fraud Worker, `fraud-signals.dlt` in the Authorization), with the same partitions as the
+  others. The Fraud Worker no longer creates `authorizations` when its consumer is off, nor anything when both its
+  consumer and its publisher are off.
+
+**The trade-off of a bounded budget for infrastructure outages.** The spec makes "database unavailable" a temporary
+failure with a configurable limit, so a database outage longer than the budget dead-letters the message at the head of
+each partition. Treating connection failures as "retry forever" was considered and not chosen: it contradicts the
+spec's configurable limit, and telling an outage from a bug by exception type is fragile (an `NpgsqlException` can be
+either). The impact is bounded instead: each attempt already runs through the context's retrying execution strategy
+(Aspire's Npgsql default retries transient errors for about a minute before giving up), so five attempts plus the
+backoff between them cover several minutes of outage; only the message at the head of a partition is dead-lettered per
+budget, not the whole backlog, since the next one starts its own budget; and the dead-lettered message keeps its key,
+value and original position in its headers, so it can be replayed. A deployment that expects longer outages raises
+`MaxAttempts` or `RetryMaxDelay`. The cost of a dead-lettered message is ordering: a later event of the same card may be
+processed before the replay. The Fraud Worker's history tolerates it (a capture or void carries the whole purchase, and
+recording is idempotent), and blocking a card is idempotent.
+
+The consequence "a message that can never be processed blocks its partition until the dead-letter topic exists" no
+longer holds: it blocks it for at most its retry budget.
