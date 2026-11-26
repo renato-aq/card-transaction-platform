@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Configuration;
+
 namespace CardPlatform.Messaging.Consuming;
 
 /// <summary>
@@ -9,6 +11,12 @@ public sealed class IntegrationEventConsumerOptions
     public const string SectionName = "Messaging:Consumer";
 
     /// <summary>
+    /// Whether the consumer runs. When <see langword="false"/>, nothing Kafka-related is registered and no event is
+    /// consumed (e.g. integration tests that do not start a broker). Default <see langword="true"/>.
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>
     /// The topics to consume. When none is configured, the topics given by the service when it registered the consumer.
     /// </summary>
     public IList<string> Topics { get; } = [];
@@ -18,6 +26,14 @@ public sealed class IntegrationEventConsumerOptions
 
     /// <summary>Upper bound of the wait between retries. Default 30 s.</summary>
     public TimeSpan RetryMaxDelay { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>Reads <see cref="Enabled"/> from <paramref name="configuration"/> (default <see langword="true"/>).</summary>
+    public static bool IsEnabled(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return configuration.GetSection(SectionName).GetValue(nameof(Enabled), defaultValue: true);
+    }
 
     internal bool IsValid()
     {

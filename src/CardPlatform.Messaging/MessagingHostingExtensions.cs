@@ -85,7 +85,8 @@ public static class MessagingHostingExtensions
     /// <paramref name="connectionName"/>, telemetry; its health check is off unless configured), in consumer group
     /// <paramref name="groupId"/> unless <c>Aspire:Confluent:Kafka:Consumer:Config:GroupId</c> says otherwise, without
     /// automatic commits and, for a new group, from the earliest offset (<see cref="KafkaConsumerDefaults"/>). One
-    /// consumer per host. The context's database must be PostgreSQL.
+    /// consumer per host. When <c>Messaging:Consumer:Enabled</c> is <see langword="false"/> nothing is registered and the
+    /// events wait in Kafka. The context's database must be PostgreSQL.
     /// </summary>
     public static IHostApplicationBuilder AddIntegrationEventConsumer<TDbContext>(
         this IHostApplicationBuilder builder,
@@ -98,6 +99,11 @@ public static class MessagingHostingExtensions
         ArgumentException.ThrowIfNullOrWhiteSpace(groupId);
         ArgumentNullException.ThrowIfNull(topics);
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionName);
+
+        if (!IntegrationEventConsumerOptions.IsEnabled(builder.Configuration))
+        {
+            return builder;
+        }
 
         string[] defaultTopics = [.. topics.Distinct(StringComparer.Ordinal)];
 
