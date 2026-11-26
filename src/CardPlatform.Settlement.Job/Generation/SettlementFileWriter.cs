@@ -6,8 +6,9 @@ namespace CardPlatform.Settlement.Job.Generation;
 
 /// <summary>
 /// Writes one settlement file, shared by every <see cref="ISettlementFileGenerator"/>: the header on creation, one detail
-/// per record given to <see cref="WriteAsync"/> or <see cref="WriteBatchAsync"/> (numbered from 1 in the order written,
-/// and added to the trailer), and the trailer on <see cref="CompleteAsync"/>.
+/// per record given to <see cref="WriteAsync"/> or <see cref="WriteBatchAsync"/>, or per line of a partition given to
+/// <see cref="AppendPartitionAsync"/> (numbered from 1 in the order written, and added to the trailer), and the trailer
+/// on <see cref="CompleteAsync"/>.
 /// </summary>
 /// <remarks>
 /// The file is written under a temporary name in the output directory and moved to its final name
@@ -124,11 +125,55 @@ public sealed class SettlementFileWriter : IAsyncDisposable
             int count = Math.Min(BatchLines, records.Count - start);
 
             // Only a buffer formatted completely is written: the formatter may leave partial bytes when it throws.
-            SettlementTrailer trailer = FormatDetails(records, start, count, _batch);
+            SettlementTrailer trailer = FormatDetails(_formatter, _trailer, records, start, count, _batch);
             await _stream.WriteAsync(_batch.AsMemory(0, count * SettlementFileLayout.LineLength), cancellationToken)
                 .ConfigureAwait(false);
             _trailer = trailer;
         }
+    }
+
+    /// <summary>
+    /// Appends the detail lines of a partition (<see cref="SettlementPartitionWriter"/>), in the order they are in its file,
+    /// numbered after the details written so far, and adds <paramref name="partitionTrailer"/>, the partition's own trailer,
+    /// to the trailer. The lines are copied as they were formatted; only their sequence number is rewritten.
+    /// </summary>
+    /// <remarks>
+    /// This is where the details of a partition get their place in the file: a partition numbers its lines from 1, as it
+    /// cannot know how many details come before it until the partitions before it are complete.
+    /// </remarks>
+    public async Task AppendPartitionAsync(
+        string partitionPath,
+        SettlementTrailer partitionTrailer,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(partitionPath);
+        ThrowIfFinished();
+
+        _batch ??= new byte[BatchLines * SettlementFileLayout.LineLength];
+        FileStream source = new(partitionPath, FileMode.Open, FileAccess.Read, FileShare.None, bufferSize: 1, useAsync: true);
+        await using (source.ConfigureAwait(false))
+        {
+            if (source.Length != partitionTrailer.DetailCount * SettlementFileLayout.LineLength)
+            {
+                throw new InvalidOperationException(
+                    $"The partition file {partitionPath} does not hold the {partitionTrailer.DetailCount} details of its trailer.");
+            }
+
+            long sequenceNumber = _trailer.DetailCount;
+            int read;
+            while ((read = await source.ReadAtLeastAsync(_batch, _batch.Length, throwOnEndOfStream: false, cancellationToken)
+                .ConfigureAwait(false)) > 0)
+            {
+                for (int offset = 0; offset < read; offset += SettlementFileLayout.LineLength)
+                {
+                    SettlementLineFormatter.RenumberDetail(++sequenceNumber, _batch.AsSpan(offset, SettlementFileLayout.LineLength));
+                }
+
+                await _stream.WriteAsync(_batch.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        _trailer = _trailer.Add(partitionTrailer);
     }
 
     /// <summary>
@@ -175,15 +220,22 @@ public sealed class SettlementFileWriter : IAsyncDisposable
             record.TransactedAt);
     }
 
-    // Formats records[start..start + count) into consecutive lines of the buffer, numbered after the details written so
-    // far, and returns the trailer including them.
-    private SettlementTrailer FormatDetails(IReadOnlyList<SettlementRecord> records, int start, int count, Span<byte> buffer)
+    /// <summary>
+    /// Formats <c>records[start..start + count)</c> into consecutive detail lines of <paramref name="buffer"/>, numbered
+    /// after the details counted by <paramref name="trailer"/>, and returns <paramref name="trailer"/> including them.
+    /// </summary>
+    internal static SettlementTrailer FormatDetails(
+        SettlementLineFormatter formatter,
+        SettlementTrailer trailer,
+        IReadOnlyList<SettlementRecord> records,
+        int start,
+        int count,
+        Span<byte> buffer)
     {
-        SettlementTrailer trailer = _trailer;
         for (int index = 0; index < count; index++)
         {
             SettlementDetail detail = ToDetail(trailer.DetailCount + 1, records[start + index]);
-            _formatter.WriteDetail(detail, buffer[(index * SettlementFileLayout.LineLength)..]);
+            formatter.WriteDetail(detail, buffer[(index * SettlementFileLayout.LineLength)..]);
             trailer = trailer.Add(detail);
         }
 

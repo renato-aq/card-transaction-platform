@@ -245,6 +245,39 @@ public class SettlementLineFormatterTests
         Assert.Throws<ArgumentException>(() => new SettlementLineFormatter(BrlHeader with { Currency = currency }));
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(42)]
+    [InlineData(999_999_999)]
+    public void Renumbering_a_detail_line_gives_the_line_formatted_with_that_number(long sequenceNumber)
+    {
+        byte[] line = Encoding.ASCII.GetBytes(DetailLine(BrlHeader, Detail(7, 12.34m)));
+
+        SettlementLineFormatter.RenumberDetail(sequenceNumber, line);
+
+        Assert.Equal(DetailLine(BrlHeader, Detail(sequenceNumber, 12.34m)), Encoding.ASCII.GetString(line));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1_000_000_000)]
+    public void Renumbering_with_a_number_out_of_the_field_throws(long sequenceNumber)
+    {
+        byte[] line = Encoding.ASCII.GetBytes(DetailLine(BrlHeader, Detail(7, 12.34m)));
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => SettlementLineFormatter.RenumberDetail(sequenceNumber, line));
+    }
+
+    [Fact]
+    public void Renumbering_a_line_that_is_not_a_detail_is_rejected()
+    {
+        byte[] header = Encoding.ASCII.GetBytes(HeaderLine(BrlHeader));
+        byte[] shortLine = new byte[SettlementFileLayout.LineLength - 1];
+
+        Assert.Throws<ArgumentException>(() => SettlementLineFormatter.RenumberDetail(1, header));
+        Assert.Throws<ArgumentException>(() => SettlementLineFormatter.RenumberDetail(1, shortLine));
+    }
+
     [Fact]
     public void Destination_smaller_than_a_line_is_rejected()
     {

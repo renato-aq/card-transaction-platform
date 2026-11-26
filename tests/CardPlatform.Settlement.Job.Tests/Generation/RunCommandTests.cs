@@ -285,7 +285,7 @@ public sealed class RunCommandTests(LedgerDatabaseFixture database) : IDisposabl
         Assert.Equal(
             [
                 "strategy", "date", "currency", "recordCount", "fileSizeBytes", "elapsedMilliseconds", "cpuTimeMilliseconds",
-                "peakWorkingSetBytes", "allocatedBytes",
+                "peakWorkingSetBytes", "allocatedBytes", "parallelism",
             ],
             metrics.EnumerateObject().Select(property => property.Name));
         Assert.Equal(strategy, metrics.GetProperty("strategy").GetString());

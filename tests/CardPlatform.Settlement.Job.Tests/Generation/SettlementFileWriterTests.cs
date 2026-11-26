@@ -61,6 +61,68 @@ public sealed class SettlementFileWriterTests : IDisposable
         Assert.Empty(Directory.GetFiles(directory));
     }
 
+    [Fact]
+    public async Task Appending_partitions_writes_the_same_file_as_writing_their_records_in_order()
+    {
+        // Partitions of more than a batch buffer, of exactly one, empty and of a single record, numbered from 1 each.
+        SettlementRecord[] records = [.. Enumerable.Range(1, (3 * SettlementFileWriter.BatchLines) + 3).Select(Record)];
+        int[] partitionSizes = [SettlementFileWriter.BatchLines + 2, SettlementFileWriter.BatchLines, 0, 1, SettlementFileWriter.BatchLines];
+        Assert.Equal(records.Length, partitionSizes.Sum());
+        string partitionDirectory = Path.Combine(_outputDirectory, "partitions");
+        Directory.CreateDirectory(partitionDirectory);
+        List<(string Path, SettlementTrailer Trailer)> partitions = [];
+        int start = 0;
+        foreach (int size in partitionSizes)
+        {
+            string path = Path.Combine(partitionDirectory, $"part{partitions.Count}.tmp");
+            SettlementPartitionWriter partition = SettlementPartitionWriter.Create(path, Header);
+            await using (partition)
+            {
+                await partition.WriteBatchAsync(records[start..(start + size)], CancellationToken.None);
+                await partition.CompleteAsync(CancellationToken.None);
+                Assert.Equal(size, partition.Trailer.DetailCount);
+                partitions.Add((path, partition.Trailer));
+            }
+
+            start += size;
+        }
+
+        SettlementFileResult direct = await WriteAsync("direct", writer => writer.WriteBatchAsync(records, CancellationToken.None));
+        SettlementFileResult appended = await WriteAsync("appended", async writer =>
+        {
+            foreach ((string path, SettlementTrailer trailer) in partitions)
+            {
+                await writer.AppendPartitionAsync(path, trailer, CancellationToken.None);
+            }
+        });
+
+        Assert.Equal(direct.Trailer, appended.Trailer);
+        Assert.Equal(await File.ReadAllBytesAsync(direct.Path), await File.ReadAllBytesAsync(appended.Path));
+    }
+
+    [Fact]
+    public async Task A_partition_whose_file_does_not_hold_the_details_of_its_trailer_is_rejected()
+    {
+        string partitionPath = Path.Combine(_outputDirectory, "partition.tmp");
+        Directory.CreateDirectory(_outputDirectory);
+        SettlementPartitionWriter partition = SettlementPartitionWriter.Create(partitionPath, Header);
+        await using (partition)
+        {
+            await partition.WriteBatchAsync([Record(1), Record(2)], CancellationToken.None);
+            await partition.CompleteAsync(CancellationToken.None);
+        }
+
+        string directory = Path.Combine(_outputDirectory, "failed");
+        SettlementFileWriter writer = await SettlementFileWriter.CreateAsync(directory, Header, CancellationToken.None);
+        await using (writer)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => writer.AppendPartitionAsync(partitionPath, new SettlementTrailer(3, 6.03m), CancellationToken.None));
+        }
+
+        Assert.Empty(Directory.GetFiles(directory));
+    }
+
     private async Task<SettlementFileResult> WriteAsync(string name, Func<SettlementFileWriter, Task> write)
     {
         SettlementFileWriter writer = await SettlementFileWriter.CreateAsync(

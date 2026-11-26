@@ -20,6 +20,10 @@ namespace CardPlatform.Settlement.Job.Measurement;
 /// Highest working set of the process during the run, in bytes (<c>peakWorkingSetBytes</c>).
 /// </param>
 /// <param name="AllocatedBytes">Bytes allocated by the GC during the run, all threads (<c>allocatedBytes</c>).</param>
+/// <param name="Parallelism">
+/// The degree of parallelism of the run (<c>parallelism</c>): partitions read at the same time, each on a connection of its
+/// own; 1 for a strategy that reads on one connection only.
+/// </param>
 public sealed record RunMetrics(
     [property: JsonPropertyName("strategy")] string Strategy,
     [property: JsonPropertyName("date")] DateOnly Date,
@@ -29,16 +33,21 @@ public sealed record RunMetrics(
     [property: JsonPropertyName("elapsedMilliseconds")] double ElapsedMilliseconds,
     [property: JsonPropertyName("cpuTimeMilliseconds")] double CpuTimeMilliseconds,
     [property: JsonPropertyName("peakWorkingSetBytes")] long PeakWorkingSetBytes,
-    [property: JsonPropertyName("allocatedBytes")] long AllocatedBytes)
+    [property: JsonPropertyName("allocatedBytes")] long AllocatedBytes,
+    [property: JsonPropertyName("parallelism")] int Parallelism)
 {
-    /// <summary>The metrics of a run of <paramref name="strategy"/> that settled <paramref name="recordCount"/> records.</summary>
+    /// <summary>
+    /// The metrics of a run of <paramref name="strategy"/>, with a degree of parallelism of <paramref name="parallelism"/>,
+    /// that settled <paramref name="recordCount"/> records.
+    /// </summary>
     public static RunMetrics Create(
         string strategy,
         DateOnly date,
         string currency,
         long recordCount,
         long fileSizeBytes,
-        RunCost cost)
+        RunCost cost,
+        int parallelism)
     {
         ArgumentNullException.ThrowIfNull(cost);
 
@@ -51,7 +60,8 @@ public sealed record RunMetrics(
             Milliseconds(cost.Elapsed),
             Milliseconds(cost.CpuTime),
             cost.PeakWorkingSetBytes,
-            cost.AllocatedBytes);
+            cost.AllocatedBytes,
+            parallelism);
     }
 
     // Microsecond precision is more than enough for a run.

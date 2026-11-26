@@ -17,4 +17,10 @@ public readonly record struct SettlementTrailer(long DetailCount, decimal TotalA
         ArgumentNullException.ThrowIfNull(detail);
         return new SettlementTrailer(DetailCount + 1, TotalAmount + detail.Amount);
     }
+
+    /// <summary>Returns the trailer with the details of <paramref name="other"/> counted and their amounts added.</summary>
+    public SettlementTrailer Add(SettlementTrailer other)
+    {
+        return new SettlementTrailer(DetailCount + other.DetailCount, TotalAmount + other.TotalAmount);
+    }
 }

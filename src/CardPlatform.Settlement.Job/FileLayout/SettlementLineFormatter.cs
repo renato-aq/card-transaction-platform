@@ -67,11 +67,7 @@ public sealed class SettlementLineFormatter
 
         Span<byte> line = StartLine(destination, SettlementFileLayout.DetailRecordType);
 
-        WriteDigits(
-            Field(line, SettlementFileLayout.Detail.SequenceNumber),
-            (ulong)detail.SequenceNumber,
-            nameof(detail),
-            "sequence number");
+        WriteSequenceNumberField(line, detail.SequenceNumber, nameof(detail));
         WriteGuid(Field(line, SettlementFileLayout.Detail.TransactionId), detail.TransactionId);
         WriteGuid(Field(line, SettlementFileLayout.Detail.MerchantAccountId), detail.MerchantAccountId);
         WriteDigits(
@@ -82,6 +78,28 @@ public sealed class SettlementLineFormatter
         WriteInstant(Field(line, SettlementFileLayout.Detail.TransactedAt), detail.TransactedAt, nameof(detail));
 
         return SettlementFileLayout.LineLength;
+    }
+
+    /// <summary>
+    /// Replaces the sequence number of the detail line at the start of <paramref name="detailLine"/>, written by
+    /// <see cref="WriteDetail"/>, with <paramref name="sequenceNumber"/>, in the same format; the rest of the line is left
+    /// as it is. Lets details formatted before their position in the file was known be numbered when they are placed.
+    /// </summary>
+    public static void RenumberDetail(long sequenceNumber, Span<byte> detailLine)
+    {
+        if (sequenceNumber < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sequenceNumber), sequenceNumber, "The sequence number starts at 1.");
+        }
+
+        if (detailLine.Length < SettlementFileLayout.LineLength
+            || detailLine[SettlementFileLayout.RecordType.Offset] != SettlementFileLayout.DetailRecordType
+            || detailLine[SettlementFileLayout.RecordLength] != SettlementFileLayout.LineTerminator)
+        {
+            throw new ArgumentException("The line is not a detail line of the settlement file.", nameof(detailLine));
+        }
+
+        WriteSequenceNumberField(detailLine, sequenceNumber, nameof(sequenceNumber));
     }
 
     /// <summary>Writes the trailer line of <paramref name="trailer"/> into <paramref name="destination"/> and returns the bytes written.</summary>
@@ -122,6 +140,15 @@ public sealed class SettlementLineFormatter
         line[SettlementFileLayout.RecordType.Offset] = recordType;
         line[SettlementFileLayout.RecordLength] = SettlementFileLayout.LineTerminator;
         return line;
+    }
+
+    private static void WriteSequenceNumberField(Span<byte> line, long sequenceNumber, string paramName)
+    {
+        WriteDigits(
+            Field(line, SettlementFileLayout.Detail.SequenceNumber),
+            (ulong)sequenceNumber,
+            paramName,
+            "sequence number");
     }
 
     private static Span<byte> Field(Span<byte> line, SettlementField field)

@@ -245,6 +245,67 @@ public sealed class JobCommandLineTests
     }
 
     [Theory]
+    [InlineData("run", "--parallelism", "8")]
+    [InlineData("run", "--parallelism=8")]
+    [InlineData("--parallelism", "8")]
+    [InlineData("--parallelism=8")]
+    public void Parallelism_is_read_in_both_forms_with_and_without_the_run_word(params string[] args)
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(args, Yesterday, out string? error);
+
+        Assert.Null(error);
+        Assert.NotNull(commandLine);
+        Assert.Equal(JobCommand.Run, commandLine.Command);
+        Assert.Empty(commandLine.HostArgs);
+        Assert.Equal(new RunOptions(Yesterday, "BRL", "settlement-files", Parallelism: 8), commandLine.Run);
+    }
+
+    [Fact]
+    public void A_run_without_parallelism_uses_the_default_parallelism()
+    {
+        RunOptions? options = JobCommandLine.Parse(["run"], Yesterday, out _)?.Run;
+
+        Assert.Equal(4, options?.Parallelism);
+        Assert.Equal(RunOptions.DefaultParallelism, options?.Parallelism);
+    }
+
+    [Fact]
+    public void A_parallelism_of_1_is_accepted()
+    {
+        RunOptions? options = JobCommandLine.Parse(["run", "--parallelism", "1"], Yesterday, out string? error)?.Run;
+
+        Assert.Null(error);
+        Assert.Equal(1, options?.Parallelism);
+    }
+
+    [Theory]
+    [InlineData("run", "--parallelism")]
+    [InlineData("run", "--parallelism", "0")]
+    [InlineData("run", "--parallelism", "-2")]
+    [InlineData("run", "--parallelism", "many")]
+    [InlineData("run", "--parallelism", "2.5")]
+    [InlineData("run", "--parallelism", "99999999999")]
+    [InlineData("--parallelism=0")]
+    [InlineData("--parallelism", " 4")]
+    public void Invalid_parallelism_is_rejected_with_an_error(params string[] args)
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(args, Yesterday, out string? error);
+
+        Assert.Null(commandLine);
+        Assert.False(string.IsNullOrWhiteSpace(error));
+    }
+
+    [Theory]
+    [InlineData("run", "--parallelism", "0")]
+    [InlineData("--parallelism", "x")]
+    public async Task An_invalid_parallelism_exits_with_the_invalid_arguments_code(params string[] args)
+    {
+        int exitCode = await SettlementJobHost.RunAsync(args);
+
+        Assert.Equal(ExitCodes.InvalidArguments, exitCode);
+    }
+
+    [Theory]
     [InlineData("settle")]
     [InlineData("seed", "--transactions")]
     [InlineData("seed", "--transactions", "0")]

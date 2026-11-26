@@ -19,13 +19,18 @@ namespace CardPlatform.Settlement.Job.Generation;
 /// Records read per query by the <c>optimized</c> strategy (keyset pagination); the <c>naive</c> strategy reads the day in
 /// one query and ignores it.
 /// </param>
+/// <param name="Parallelism">
+/// Partitions the <c>optimized</c> strategy reads at the same time, each on a connection of its own; 1 reads everything in
+/// one sequence on one connection. The <c>naive</c> strategy reads on one connection and ignores it.
+/// </param>
 public sealed record RunOptions(
     DateOnly Date,
     string Currency,
     string OutputDirectory,
     string? MetricsOutputPath = null,
     string Strategy = RunOptions.DefaultStrategy,
-    int PageSize = RunOptions.DefaultPageSize)
+    int PageSize = RunOptions.DefaultPageSize,
+    int Parallelism = RunOptions.DefaultParallelism)
 {
     public const string DefaultCurrency = "BRL";
 
@@ -37,6 +42,13 @@ public sealed record RunOptions(
     /// little time, and each page costs one query and keeps up to this many records in flight in the database driver.
     /// </summary>
     public const int DefaultPageSize = 10_000;
+
+    /// <summary>
+    /// The parallelism of a run that does not choose one. Each partition holds a PostgreSQL connection for the whole run,
+    /// so the default stays low next to the server's connection limit (100 by default), shared with the services; on a
+    /// seeded day of 500,000 records, higher degrees gained little more time.
+    /// </summary>
+    public const int DefaultParallelism = 4;
 
     /// <summary>
     /// Relative to the working directory, which is the project directory when the AppHost starts the job, so the files
@@ -55,6 +67,8 @@ public sealed record RunOptions(
                               also write the metrics of the run to this JSON file (default: only logged)
           --strategy <name>   optimized (streaming, the default) or naive (version 1, the baseline)
           --page-size <n>     records per query of the optimized strategy (default 10000)
+          --parallelism <n>   partitions the optimized strategy reads at the same time, one database connection each
+                              (default 4; 1 reads sequentially)
         """;
 
     private const string DateFormat = "yyyy-MM-dd";
@@ -117,6 +131,9 @@ public sealed record RunOptions(
                 "page-size" => int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int pageSize) && pageSize > 0
                     ? options with { PageSize = pageSize }
                     : null,
+                "parallelism" => int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out int parallelism) && parallelism > 0
+                    ? options with { Parallelism = parallelism }
+                    : null,
                 _ => null,
             };
 
@@ -137,7 +154,8 @@ public sealed record RunOptions(
 
     /// <summary>
     /// Whether <paramref name="arg"/> is one of the options of <see cref="Parse"/> (<c>--date</c>, <c>--currency</c>,
-    /// <c>--output</c>, <c>--metrics-output</c>, <c>--strategy</c>, <c>--page-size</c>), in either form: <c>--name</c> or <c>--name=value</c>.
+    /// <c>--output</c>, <c>--metrics-output</c>, <c>--strategy</c>, <c>--page-size</c>, <c>--parallelism</c>), in either form:
+    /// <c>--name</c> or <c>--name=value</c>.
     /// </summary>
     public static bool IsOption(string arg)
     {
@@ -155,7 +173,7 @@ public sealed record RunOptions(
 
     private static bool IsOptionName(string name)
     {
-        return name is "date" or "currency" or "output" or "metrics-output" or "strategy" or "page-size";
+        return name is "date" or "currency" or "output" or "metrics-output" or "strategy" or "page-size" or "parallelism";
     }
 
     private static bool IsStrategy(string value)

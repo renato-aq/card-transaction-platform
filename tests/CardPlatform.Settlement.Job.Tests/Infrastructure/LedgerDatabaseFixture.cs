@@ -15,9 +15,12 @@ namespace CardPlatform.Settlement.Job.Tests.Infrastructure;
 /// </summary>
 public sealed class LedgerDatabaseFixture : IAsyncLifetime
 {
-    // Same major version as the PostgreSQL container started by the AppHost (Aspire 17).
+    // Same major version as the PostgreSQL container started by the AppHost (Aspire 17). Every test database keeps the
+    // idle connections of its pool open while the test process lives, and a parallel run opens one per partition, so
+    // the default limit of 100 connections is raised.
     private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:18.6")
         .WithDatabase(SettlementJobHost.LedgerConnectionName)
+        .WithCommand("-c", "max_connections=500")
         .Build();
 
     public Task InitializeAsync()

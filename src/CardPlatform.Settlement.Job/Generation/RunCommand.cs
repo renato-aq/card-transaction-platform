@@ -42,7 +42,8 @@ public sealed partial class RunCommand(ISettlementFileGenerator generator, ILogg
                 options.Currency,
                 result.Trailer.DetailCount,
                 new FileInfo(result.Path).Length,
-                cost);
+                cost,
+                result.Parallelism);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -65,7 +66,8 @@ public sealed partial class RunCommand(ISettlementFileGenerator generator, ILogg
             metrics.ElapsedMilliseconds,
             metrics.CpuTimeMilliseconds,
             metrics.PeakWorkingSetBytes,
-            metrics.AllocatedBytes);
+            metrics.AllocatedBytes,
+            metrics.Parallelism);
 
         return options.MetricsOutputPath is null
             ? ExitCodes.Success
@@ -102,7 +104,7 @@ public sealed partial class RunCommand(ISettlementFileGenerator generator, ILogg
         Level = LogLevel.Information,
         Message = "Run summary: strategy {Strategy}, date {Date:yyyy-MM-dd}, currency {Currency}, {RecordCount} records, "
             + "file {FileSizeBytes} bytes, elapsed {ElapsedMilliseconds} ms, CPU {CpuTimeMilliseconds} ms, "
-            + "peak working set {PeakWorkingSetBytes} bytes, allocated {AllocatedBytes} bytes")]
+            + "peak working set {PeakWorkingSetBytes} bytes, allocated {AllocatedBytes} bytes, parallelism {Parallelism}")]
     private partial void LogSummary(
         string strategy,
         DateOnly date,
@@ -112,7 +114,8 @@ public sealed partial class RunCommand(ISettlementFileGenerator generator, ILogg
         double elapsedMilliseconds,
         double cpuTimeMilliseconds,
         long peakWorkingSetBytes,
-        long allocatedBytes);
+        long allocatedBytes,
+        int parallelism);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Run metrics written: {Path}")]
     private partial void LogMetricsWritten(string path);
