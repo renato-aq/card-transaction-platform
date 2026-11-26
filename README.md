@@ -295,6 +295,38 @@ outbox publisher as the Authorization's. Its event id is derived from the author
 only when its approval is first recorded, so an authorization raises at most one suspicion
 ([ADR 0012](docs/adr/0012-judge-purchases-by-fraud-rules-at-approval.md)).
 
+### Retries and dead-letter topics
+
+Both consumers (the Fraud Worker on `authorizations`, the Authorization on `fraud-signals`) handle failures the same
+way ([ADR 0011, amendment](docs/adr/0011-consume-integration-events-idempotently.md)). A temporary failure (e.g. the
+database is down) is retried in process with exponential backoff, before any later message of the same partition, up to
+`Messaging:Consumer:MaxAttempts` attempts (default 5; `RetryInitialDelay` 1 s doubling up to `RetryMaxDelay` 30 s). A
+permanent failure (a message that is not a valid event envelope, or an event the service rejects, e.g. an invalid
+currency) and a message that ran out of attempts go to `<topic>.dlt` (`authorizations.dlt`, `fraud-signals.dlt`;
+created on startup in Development). The offset is committed only after the dead-letter topic acknowledged the message,
+so nothing is lost and the partition moves on; each dead-lettered message is logged as an error.
+
+A dead-lettered message keeps its original key, value (byte for byte) and headers, plus:
+
+| Header | Value |
+|---|---|
+| `dlt-reason` | the error message (up to 1000 characters) |
+| `dlt-exception-type` | e.g. `System.Text.Json.JsonException` |
+| `dlt-failure-kind` | `permanent` or `retries-exhausted` |
+| `dlt-attempts` | how many times it was processed |
+| `dlt-original-topic`, `dlt-original-partition`, `dlt-original-offset` | where it came from |
+| `dlt-consumer-group` | the consumer group that gave up on it |
+| `dlt-failed-at` | when (UTC, ISO 8601) |
+
+To inspect them, open Kafka UI from the Aspire dashboard, pick the `.dlt` topic and look at the messages with their
+headers. Reprocessing is manual: once the cause is fixed, produce the message's key and value again to the original
+topic, to the partition in `dlt-original-partition` (so it stays with the other events of its card): e.g. with Kafka
+UI's "Produce message" (copy key and value, choose the partition), or with a CLI such as
+`kcat -C -b <broker> -t authorizations.dlt -o <offset> -c 1 -e -f '%k\t%s\n'` piped into
+`kcat -P -b <broker> -t authorizations -p <partition> -K '\t'` (the values are single-line JSON). Replays are safe: a
+dead-lettered event was not marked as processed, so it is processed normally, and an event that was processed is
+skipped by its event id.
+
 ### When the Ledger is down
 
 The Authorization talks to the Ledger through the `ILedgerClient` port, implemented by a typed `HttpClient` whose base
