@@ -19,7 +19,7 @@ public enum JobCommand
 /// <summary>
 /// The parsed command line: <c>[command] [options]</c>. With no arguments, or when the first one is an option, the
 /// command is <see cref="JobCommand.Run"/>, the default: its options (<c>--date</c>, <c>--currency</c>,
-/// <c>--output</c>) are read exactly as after <c>run</c>, and every other argument (such as
+/// <c>--output</c>, <c>--metrics-output</c>) are read exactly as after <c>run</c>, and every other argument (such as
 /// <c>--environment=Development</c>) goes to the host configuration as before. Otherwise the first argument names the
 /// command and the rest are its options.
 /// </summary>

@@ -12,6 +12,12 @@ namespace CardPlatform.Settlement.Job.Generation;
 /// </summary>
 public sealed class NaiveSettlementFileGenerator(LedgerReadDbContext dbContext) : ISettlementFileGenerator
 {
+    /// <summary>Name of this strategy.</summary>
+    public const string StrategyName = "naive";
+
+    /// <inheritdoc/>
+    public string Name => StrategyName;
+
     /// <inheritdoc/>
     public async Task<SettlementFileResult> GenerateAsync(RunOptions options, CancellationToken cancellationToken)
     {

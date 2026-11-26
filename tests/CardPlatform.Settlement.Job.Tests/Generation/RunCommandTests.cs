@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Text.Json;
 
 using CardPlatform.Settlement.Job.Tests.Infrastructure;
 
@@ -245,6 +246,122 @@ public sealed class RunCommandTests(LedgerDatabaseFixture database) : IDisposabl
         Assert.Contains("connection string 'ledgerdb' is missing", error.Message, StringComparison.Ordinal);
         Assert.Contains("ConnectionStrings__ledgerdb", error.Message, StringComparison.Ordinal);
         Assert.False(Directory.Exists(_outputDirectory));
+    }
+
+    [Fact]
+    public async Task Run_with_metrics_output_writes_a_json_with_every_field_and_the_count_of_the_trailer()
+    {
+        string connectionString = await database.CreateDatabaseAsync();
+        int seedExitCode = await SettlementJobHost.RunAsync(
+            ["seed", "--transactions", "2000", "--merchants", "5", "--cards", "30", "--date", "2026-11-20", "--seed", "7"],
+            builder => UseLedgerDatabase(builder, connectionString));
+        Assert.Equal(ExitCodes.Success, seedExitCode);
+        string metricsPath = Path.Combine(_outputDirectory, "metrics", "run.json");
+
+        int exitCode = await RunAsync(connectionString, "--date", "2026-11-20", "--metrics-output", metricsPath);
+
+        Assert.Equal(ExitCodes.Success, exitCode);
+        string settlementFile = SettlementFilePath("20261120", "BRL");
+        long trailerCount = long.Parse(ReadLines(settlementFile)[^1].AsSpan(1, 9), CultureInfo.InvariantCulture);
+
+        using JsonDocument json = JsonDocument.Parse(await File.ReadAllTextAsync(metricsPath));
+        JsonElement metrics = json.RootElement;
+        Assert.Equal(
+            [
+                "strategy", "date", "currency", "recordCount", "fileSizeBytes", "elapsedMilliseconds", "cpuTimeMilliseconds",
+                "peakWorkingSetBytes", "allocatedBytes",
+            ],
+            metrics.EnumerateObject().Select(property => property.Name));
+        Assert.Equal("naive", metrics.GetProperty("strategy").GetString());
+        Assert.Equal("2026-11-20", metrics.GetProperty("date").GetString());
+        Assert.Equal("BRL", metrics.GetProperty("currency").GetString());
+        Assert.Equal(2000L, trailerCount);
+        Assert.Equal(trailerCount, metrics.GetProperty("recordCount").GetInt64());
+        Assert.Equal(new FileInfo(settlementFile).Length, metrics.GetProperty("fileSizeBytes").GetInt64());
+        Assert.True(metrics.GetProperty("elapsedMilliseconds").GetDouble() > 0);
+        Assert.True(metrics.GetProperty("cpuTimeMilliseconds").GetDouble() > 0);
+        Assert.True(metrics.GetProperty("peakWorkingSetBytes").GetInt64() > 0);
+        Assert.True(metrics.GetProperty("allocatedBytes").GetInt64() > 0);
+
+        // Only the final metrics file is left: the temporary one was renamed.
+        Assert.Equal([metricsPath], Directory.GetFiles(Path.GetDirectoryName(metricsPath)!));
+    }
+
+    [Fact]
+    public async Task Run_writes_the_same_settlement_file_with_and_without_metrics_output()
+    {
+        string connectionString = await database.CreateDatabaseAsync();
+        int seedExitCode = await SettlementJobHost.RunAsync(
+            ["seed", "--transactions", "1000", "--merchants", "4", "--cards", "20", "--date", "2026-11-20", "--seed", "3"],
+            builder => UseLedgerDatabase(builder, connectionString));
+        Assert.Equal(ExitCodes.Success, seedExitCode);
+        await KnownDay.ArrangeAsync(connectionString);
+
+        int withoutMetricsExitCode = await RunAsync(connectionString, "--date", "2026-11-20");
+        byte[] withoutMetrics = await File.ReadAllBytesAsync(SettlementFilePath("20261120", "BRL"));
+        int withMetricsExitCode = await RunAsync(
+            connectionString, "--date", "2026-11-20", "--metrics-output", Path.Combine(_outputDirectory, "metrics", "run.json"));
+        byte[] withMetrics = await File.ReadAllBytesAsync(SettlementFilePath("20261120", "BRL"));
+
+        Assert.Equal(ExitCodes.Success, withoutMetricsExitCode);
+        Assert.Equal(ExitCodes.Success, withMetricsExitCode);
+        Assert.Equal(1005 * (RecordLength + 1) + (2 * (RecordLength + 1)), withoutMetrics.Length);
+        Assert.Equal(withoutMetrics, withMetrics);
+    }
+
+    [Fact]
+    public async Task Every_successful_run_logs_its_summary_and_writes_no_metrics_file_unless_asked()
+    {
+        string connectionString = await database.CreateDatabaseAsync();
+        await KnownDay.ArrangeAsync(connectionString);
+        using CapturedLogs logs = new();
+
+        int exitCode = await RunAsync(connectionString, logs, "--date", "2026-11-20", "--output", _outputDirectory);
+
+        Assert.Equal(ExitCodes.Success, exitCode);
+        CapturedLogEntry summary = Assert.Single(logs.Entries, entry => entry.Message.StartsWith("Run summary:", StringComparison.Ordinal));
+        Assert.Equal(LogLevel.Information, summary.Level);
+        long fileSize = new FileInfo(SettlementFilePath("20261120", "BRL")).Length;
+        Assert.StartsWith(
+            string.Create(
+                CultureInfo.InvariantCulture,
+                $"Run summary: strategy naive, date 2026-11-20, currency BRL, 5 records, file {fileSize} bytes, elapsed "),
+            summary.Message,
+            StringComparison.Ordinal);
+        Assert.Contains(" ms, CPU ", summary.Message, StringComparison.Ordinal);
+        Assert.Contains(" ms, peak working set ", summary.Message, StringComparison.Ordinal);
+        Assert.Contains(" bytes, allocated ", summary.Message, StringComparison.Ordinal);
+        Assert.Equal([SettlementFilePath("20261120", "BRL")], Directory.GetFiles(_outputDirectory, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task A_failed_run_writes_no_metrics_file_and_removes_the_one_of_an_earlier_run()
+    {
+        string connectionString = await database.CreateDatabaseAsync();
+        await KnownDay.ArrangeAsync(connectionString);
+        string metricsDirectory = Path.Combine(_outputDirectory, "metrics");
+        string metricsPath = Path.Combine(metricsDirectory, "run.json");
+        Assert.Equal(ExitCodes.Success, await RunAsync(connectionString, "--date", "2026-11-20", "--metrics-output", metricsPath));
+        Assert.True(File.Exists(metricsPath));
+
+        // The same amount out of range as in the failed run above: the formatter throws mid-file.
+        Guid lastMerchant = Guid.Parse("ffffffff-0000-0000-0000-000000000001", CultureInfo.InvariantCulture);
+        await KnownDay.AddAccountAsync(connectionString, lastMerchant, "Merchant", "BRL");
+        await KnownDay.AddTransactionAsync(
+            connectionString,
+            Guid.Parse("b0000000-0000-0000-0000-000000000001", CultureInfo.InvariantCulture),
+            new DateTimeOffset(2026, 11, 20, 18, 0, 0, TimeSpan.Zero),
+            (KnownDay.Card, "Debit", 10_000_000_000_000m, "BRL"),
+            (lastMerchant, "Credit", 10_000_000_000_000m, "BRL"));
+        using CapturedLogs logs = new();
+
+        int exitCode = await RunAsync(
+            connectionString, logs, "--date", "2026-11-20", "--output", _outputDirectory, "--metrics-output", metricsPath);
+
+        Assert.Equal(ExitCodes.Failure, exitCode);
+        Assert.Single(logs.Errors);
+        Assert.DoesNotContain(logs.Entries, entry => entry.Message.StartsWith("Run summary:", StringComparison.Ordinal));
+        Assert.Empty(Directory.GetFiles(metricsDirectory));
     }
 
     private Task<int> RunAsync(string connectionString, params string[] options)

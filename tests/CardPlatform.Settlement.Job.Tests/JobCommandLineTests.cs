@@ -137,6 +137,42 @@ public sealed class JobCommandLineTests
     }
 
     [Theory]
+    [InlineData("run", "--metrics-output", "metrics/run.json")]
+    [InlineData("run", "--metrics-output=metrics/run.json")]
+    [InlineData("--metrics-output", "metrics/run.json")]
+    [InlineData("--metrics-output=metrics/run.json")]
+    public void Metrics_output_is_read_in_both_forms_with_and_without_the_run_word(params string[] args)
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(args, Yesterday, out string? error);
+
+        Assert.Null(error);
+        Assert.NotNull(commandLine);
+        Assert.Equal(JobCommand.Run, commandLine.Command);
+        Assert.Empty(commandLine.HostArgs);
+        Assert.Equal(new RunOptions(Yesterday, "BRL", "settlement-files", "metrics/run.json"), commandLine.Run);
+    }
+
+    [Fact]
+    public void Without_metrics_output_the_run_writes_no_metrics_file()
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(["run", "--date", "2026-11-20"], Yesterday, out _);
+
+        Assert.Null(commandLine?.Run?.MetricsOutputPath);
+    }
+
+    [Theory]
+    [InlineData("run", "--metrics-output")]
+    [InlineData("run", "--metrics-output", " ")]
+    [InlineData("--metrics-output=")]
+    public void A_missing_or_blank_metrics_output_is_rejected_with_an_error(params string[] args)
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(args, Yesterday, out string? error);
+
+        Assert.Null(commandLine);
+        Assert.False(string.IsNullOrWhiteSpace(error));
+    }
+
+    [Theory]
     [InlineData("settle")]
     [InlineData("seed", "--transactions")]
     [InlineData("seed", "--transactions", "0")]

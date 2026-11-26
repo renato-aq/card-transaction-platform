@@ -6,7 +6,11 @@ namespace CardPlatform.Settlement.Job.Generation;
 /// <param name="Date">The settlement date: the UTC day whose transactions are settled.</param>
 /// <param name="Currency">ISO 4217 code of the entries to settle.</param>
 /// <param name="OutputDirectory">Directory of the file; a relative path is resolved against the working directory.</param>
-public sealed record RunOptions(DateOnly Date, string Currency, string OutputDirectory)
+/// <param name="MetricsOutputPath">
+/// File to write the metrics of the run to, as JSON (<see cref="Measurement.RunMetrics"/>), or <see langword="null"/>
+/// to only log them; a relative path is resolved against the working directory.
+/// </param>
+public sealed record RunOptions(DateOnly Date, string Currency, string OutputDirectory, string? MetricsOutputPath = null)
 {
     public const string DefaultCurrency = "BRL";
 
@@ -23,6 +27,8 @@ public sealed record RunOptions(DateOnly Date, string Currency, string OutputDir
           --date <yyyy-MM-dd> settlement date, a UTC day (default yesterday, UTC)
           --currency <code>   ISO 4217 currency code (default BRL)
           --output <dir>      output directory (default settlement-files, under the working directory)
+          --metrics-output <file>
+                              also write the metrics of the run to this JSON file (default: only logged)
         """;
 
     private const string DateFormat = "yyyy-MM-dd";
@@ -80,12 +86,13 @@ public sealed record RunOptions(DateOnly Date, string Currency, string OutputDir
                     : null,
                 "currency" => IsCurrencyCode(value) ? options with { Currency = value } : null,
                 "output" => string.IsNullOrWhiteSpace(value) ? null : options with { OutputDirectory = value },
+                "metrics-output" => string.IsNullOrWhiteSpace(value) ? null : options with { MetricsOutputPath = value },
                 _ => null,
             };
 
             if (updated is null)
             {
-                error = name is "date" or "currency" or "output"
+                error = IsOptionName(name)
                     ? $"Invalid value '{value}' for option '--{name}'."
                     : $"Unknown option '--{name}'.";
                 return null;
@@ -100,7 +107,7 @@ public sealed record RunOptions(DateOnly Date, string Currency, string OutputDir
 
     /// <summary>
     /// Whether <paramref name="arg"/> is one of the options of <see cref="Parse"/> (<c>--date</c>, <c>--currency</c>,
-    /// <c>--output</c>), in either form: <c>--name</c> or <c>--name=value</c>.
+    /// <c>--output</c>, <c>--metrics-output</c>), in either form: <c>--name</c> or <c>--name=value</c>.
     /// </summary>
     public static bool IsOption(string arg)
     {
@@ -113,7 +120,12 @@ public sealed record RunOptions(DateOnly Date, string Currency, string OutputDir
 
         int separator = arg.IndexOf('=', StringComparison.Ordinal);
         string name = separator >= 0 ? arg[2..separator] : arg[2..];
-        return name is "date" or "currency" or "output";
+        return IsOptionName(name);
+    }
+
+    private static bool IsOptionName(string name)
+    {
+        return name is "date" or "currency" or "output" or "metrics-output";
     }
 
     // Same rule as the ledger: exactly three uppercase ASCII letters.

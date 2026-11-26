@@ -7,6 +7,12 @@ namespace CardPlatform.Settlement.Job.Generation;
 /// </summary>
 public interface ISettlementFileGenerator
 {
+    /// <summary>
+    /// Stable name of the strategy (e.g. <c>naive</c>), reported in the metrics of the run so that runs of different
+    /// strategies can be compared.
+    /// </summary>
+    string Name { get; }
+
     /// <summary>Writes the settlement file described by <paramref name="options"/> and returns it.</summary>
     Task<SettlementFileResult> GenerateAsync(RunOptions options, CancellationToken cancellationToken);
 }
