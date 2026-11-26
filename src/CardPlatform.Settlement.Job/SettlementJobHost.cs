@@ -1,3 +1,5 @@
+using CardPlatform.Settlement.Job.Generation;
+using CardPlatform.Settlement.Job.ReadModel;
 using CardPlatform.Settlement.Job.Seeding;
 
 namespace CardPlatform.Settlement.Job;
@@ -12,6 +14,13 @@ public static partial class SettlementJobHost
     /// <summary>Name of the connection string declared by the AppHost (<c>postgres.AddDatabase("ledgerdb")</c>).</summary>
     public const string LedgerConnectionName = "ledgerdb";
 
+    // Fallback connection string keys of Aspire.Npgsql (seed) and Aspire.Npgsql.EntityFrameworkCore.PostgreSQL (run).
+    private const string NpgsqlConnectionStringKey = "Aspire:Npgsql:ConnectionString";
+
+    private const string EntityFrameworkConnectionStringKey = "Aspire:Npgsql:EntityFrameworkCore:PostgreSQL:ConnectionString";
+
+    private static readonly TimeSpan RunCommandTimeout = TimeSpan.FromMinutes(10);
+
     /// <summary>
     /// Runs the command given by <paramref name="args"/>. <paramref name="configure"/> lets tests adjust the host before
     /// any service is registered, e.g. to set the connection string.
@@ -20,7 +29,8 @@ public static partial class SettlementJobHost
     {
         ArgumentNullException.ThrowIfNull(args);
 
-        // Purchases are settled the day after; seeding yesterday by default gives the job a day to settle.
+        // Purchases are settled the day after: the job settles yesterday by default, and seeding yesterday by default
+        // gives it a day to settle.
         DateOnly yesterday = DateOnly.FromDateTime(TimeProvider.System.GetUtcNow().UtcDateTime).AddDays(-1);
         JobCommandLine? commandLine = JobCommandLine.Parse(args, yesterday, out string? error);
         if (commandLine is null)
@@ -33,21 +43,51 @@ public static partial class SettlementJobHost
         return commandLine.Command switch
         {
             JobCommand.Seed => await SeedAsync(commandLine.Seed!, configure).ConfigureAwait(false),
-            _ => await RunJobAsync([.. commandLine.HostArgs], configure).ConfigureAwait(false),
+            _ => await RunJobAsync(commandLine.Run!, [.. commandLine.HostArgs], configure).ConfigureAwait(false),
         };
     }
 
-    private static async Task<int> RunJobAsync(string[] hostArgs, Action<HostApplicationBuilder>? configure)
+    private static async Task<int> RunJobAsync(
+        RunOptions options,
+        string[] hostArgs,
+        Action<HostApplicationBuilder>? configure)
     {
         HostApplicationBuilder builder = Host.CreateApplicationBuilder(hostArgs);
         configure?.Invoke(builder);
 
         builder.AddServiceDefaults();
-        builder.Services.AddHostedService<SettlementJob>();
+        builder.AddNpgsqlDbContext<LedgerReadDbContext>(
+            LedgerConnectionName,
+            // Sorting a whole day of entries before the first row is returned can take longer than the 30 s default.
+            configureSettings: static settings => settings.CommandTimeout ??= (int)RunCommandTimeout.TotalSeconds);
+        builder.Services.AddScoped<ISettlementFileGenerator, NaiveSettlementFileGenerator>();
+        builder.Services.AddScoped<RunCommand>();
 
         using IHost host = builder.Build();
-        await host.RunAsync().ConfigureAwait(false);
-        return ExitCodes.Success;
+        await host.StartAsync().ConfigureAwait(false);
+        try
+        {
+            // Ctrl+C stops the application, which cancels the run.
+            CancellationToken stopping = host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping;
+
+            // Resolving the DbContext without a connection string throws; fail with a clear message instead.
+            if (!HasLedgerConnectionString(host.Services.GetRequiredService<IConfiguration>(), EntityFrameworkConnectionStringKey))
+            {
+                ILogger logger = host.Services.GetRequiredService<ILogger<RunCommand>>();
+                LogRunConnectionStringMissing(logger, LedgerConnectionName);
+                return ExitCodes.Failure;
+            }
+
+            AsyncServiceScope scope = host.Services.CreateAsyncScope();
+            await using (scope.ConfigureAwait(false))
+            {
+                return await scope.ServiceProvider.GetRequiredService<RunCommand>().RunAsync(options, stopping).ConfigureAwait(false);
+            }
+        }
+        finally
+        {
+            await host.StopAsync().ConfigureAwait(false);
+        }
     }
 
     private static async Task<int> SeedAsync(SeedOptions options, Action<HostApplicationBuilder>? configure)
@@ -69,7 +109,7 @@ public static partial class SettlementJobHost
             CancellationToken stopping = host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping;
 
             // Resolving the data source without a connection string throws; fail with a clear message instead.
-            if (!HasLedgerConnectionString(host.Services.GetRequiredService<IConfiguration>()))
+            if (!HasLedgerConnectionString(host.Services.GetRequiredService<IConfiguration>(), NpgsqlConnectionStringKey))
             {
                 ILogger logger = host.Services.GetRequiredService<ILogger<SeedCommand>>();
                 LogConnectionStringMissing(logger, LedgerConnectionName);
@@ -84,11 +124,11 @@ public static partial class SettlementJobHost
         }
     }
 
-    // Aspire.Npgsql reads ConnectionStrings:{name} first and falls back to Aspire:Npgsql:ConnectionString.
-    private static bool HasLedgerConnectionString(IConfiguration configuration)
+    // The Aspire integrations read ConnectionStrings:{name} first and fall back to a key of their own settings.
+    private static bool HasLedgerConnectionString(IConfiguration configuration, string fallbackKey)
     {
         return !string.IsNullOrWhiteSpace(configuration.GetConnectionString(LedgerConnectionName))
-            || !string.IsNullOrWhiteSpace(configuration["Aspire:Npgsql:ConnectionString"]);
+            || !string.IsNullOrWhiteSpace(configuration[fallbackKey]);
     }
 
     [LoggerMessage(
@@ -96,4 +136,10 @@ public static partial class SettlementJobHost
         Message = "The connection string '{ConnectionName}' is missing; nothing was seeded. Start the job from the Aspire "
             + "AppHost, which provides it, or set it in the environment variable ConnectionStrings__ledgerdb")]
     private static partial void LogConnectionStringMissing(ILogger logger, string connectionName);
+
+    [LoggerMessage(
+        Level = LogLevel.Error,
+        Message = "The connection string '{ConnectionName}' is missing; no settlement file was written. Start the job from "
+            + "the Aspire AppHost, which provides it, or set it in the environment variable ConnectionStrings__ledgerdb")]
+    private static partial void LogRunConnectionStringMissing(ILogger logger, string connectionName);
 }

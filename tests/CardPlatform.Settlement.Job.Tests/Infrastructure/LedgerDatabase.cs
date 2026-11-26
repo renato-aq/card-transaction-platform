@@ -2,9 +2,27 @@ using Npgsql;
 
 namespace CardPlatform.Settlement.Job.Tests.Infrastructure;
 
-/// <summary>Plain SQL reads of a ledger database, for the assertions of the seed tests.</summary>
+/// <summary>Plain SQL on a ledger database, to arrange the data of the tests and for their assertions.</summary>
 internal static class LedgerDatabase
 {
+    public static async Task ExecuteAsync(string connectionString, string sql, params object[] parameters)
+    {
+        NpgsqlDataSource dataSource = NpgsqlDataSource.Create(connectionString);
+        await using (dataSource.ConfigureAwait(false))
+        {
+            NpgsqlCommand command = dataSource.CreateCommand(sql);
+            await using (command.ConfigureAwait(false))
+            {
+                foreach (object parameter in parameters)
+                {
+                    command.Parameters.Add(new NpgsqlParameter { Value = parameter });
+                }
+
+                await command.ExecuteNonQueryAsync().ConfigureAwait(false);
+            }
+        }
+    }
+
     public static async Task<T> ScalarAsync<T>(string connectionString, string sql, params object[] parameters)
     {
         NpgsqlDataSource dataSource = NpgsqlDataSource.Create(connectionString);
