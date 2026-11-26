@@ -71,7 +71,7 @@ public sealed class AuthorizationEventPublishingTests(KafkaAuthorizationApiFacto
         using IAdminClient admin =
             new AdminClientBuilder(new AdminClientConfig { BootstrapServers = factory.KafkaBootstrapServers }).Build();
 
-        foreach (string topic in new[] { Topics.Authorizations, Topics.FraudSignals })
+        foreach (string topic in new[] { Topics.Authorizations, Topics.FraudSignals, Topics.DeadLetterOf(Topics.FraudSignals) })
         {
             TopicMetadata metadata = Assert.Single(admin.GetMetadata(topic, TimeSpan.FromSeconds(10)).Topics);
             Assert.Equal(ErrorCode.NoError, metadata.Error.Code);

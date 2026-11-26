@@ -52,3 +52,13 @@ public sealed class KafkaAuthorizationApiCollectionFixture : ICollectionFixture<
 {
     public const string Name = "Authorization API with Kafka";
 }
+
+/// <summary>
+/// A second API with its own broker, for the tests that make the consumer of <c>fraud-signals</c> log errors (messages
+/// it sends to <c>fraud-signals.dlt</c>), kept apart from those that check it logs none.
+/// </summary>
+[CollectionDefinition(Name)]
+public sealed class KafkaAuthorizationApiDeadLetterCollectionFixture : ICollectionFixture<KafkaAuthorizationApiFactory>
+{
+    public const string Name = "Authorization API with Kafka (dead letters)";
+}

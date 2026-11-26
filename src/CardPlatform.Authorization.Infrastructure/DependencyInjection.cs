@@ -45,7 +45,8 @@ public static class DependencyInjection
     /// directly, the Ledger client, the outbox publisher, which sends the decisions written to the outbox to Kafka
     /// (connection string <c>kafka</c>, settings in <c>Messaging:Outbox</c>, see ADR 0010), and the consumer of
     /// <c>fraud-signals</c> (consumer group <see cref="ConsumerGroupId"/>, settings in <c>Messaging:Consumer</c>, see
-    /// ADR 0011), which blocks the card of each <c>FraudSuspected</c> once per event id. In Development the Kafka topics
+    /// ADR 0011), which blocks the card of each <c>FraudSuspected</c> once per event id and sends the messages it cannot
+    /// process to <c>fraud-signals.dlt</c>. In Development the Kafka topics
     /// the Authorization uses are created on startup. With <c>Messaging:Outbox:Enabled</c> set to
     /// <see langword="false"/> the publisher is not registered and the decisions stay in the outbox; with
     /// <c>Messaging:Consumer:Enabled</c> set to <see langword="false"/> the consumer is not registered and the fraud
@@ -76,7 +77,7 @@ public static class DependencyInjection
 
         if (builder.Environment.IsDevelopment() && (publishes || consumes))
         {
-            // The topic it publishes on and the one it consumes; registered first, so the topics exist before the
+            // The topic it publishes on, and the one it consumes with its dead-letter topic; registered first, so the topics exist before the
             // publisher publishes and the consumer subscribes.
             List<string> topics = [];
             if (publishes)
@@ -87,6 +88,7 @@ public static class DependencyInjection
             if (consumes)
             {
                 topics.Add(Topics.FraudSignals);
+                topics.Add(Topics.DeadLetterOf(Topics.FraudSignals));
             }
 
             builder.AddKafkaTopicInitializer(topics);
