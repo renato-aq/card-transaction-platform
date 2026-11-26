@@ -22,8 +22,9 @@ namespace CardPlatform.Authorization.Api.Tests.Infrastructure;
 /// test server: the calls go through the real client, resilience pipeline, HTTP contract and Ledger, without a network.
 /// </para>
 /// <para>
-/// No Kafka is started: the outbox publisher is disabled (<c>Messaging:Outbox:Enabled</c>), so the decisions stay in the
-/// outbox. <see cref="KafkaAuthorizationApiFactory"/> adds a Kafka container and enables it.
+/// No Kafka is started: the outbox publisher (<c>Messaging:Outbox:Enabled</c>) and the consumer of <c>fraud-signals</c>
+/// (<c>Messaging:Consumer:Enabled</c>) are disabled, so the decisions stay in the outbox.
+/// <see cref="KafkaAuthorizationApiFactory"/> adds a Kafka container and enables both.
 /// </para>
 /// </summary>
 public class AuthorizationApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
@@ -74,10 +75,11 @@ public class AuthorizationApiFactory : WebApplicationFactory<Program>, IAsyncLif
         return ValueTask.CompletedTask;
     }
 
-    /// <summary>Configures messaging; by default the outbox publisher is disabled, as no broker runs.</summary>
+    /// <summary>Configures messaging; by default the outbox publisher and the consumer are disabled, as no broker runs.</summary>
     protected virtual void ConfigureMessaging(IWebHostBuilder builder)
     {
         builder.UseSetting("Messaging:Outbox:Enabled", "false");
+        builder.UseSetting("Messaging:Consumer:Enabled", "false");
     }
 
     /// <summary>
