@@ -115,8 +115,12 @@ nor Kafka. The Fraud Worker will reuse the same publisher for `FraudSuspected`.
   0003 anyway.
 - A row that can never be published (e.g. larger than the broker accepts) stops publishing for the whole service and
   its `attempts` keeps growing; parking such rows in a dead-letter table is not done yet.
-- A fatal error of the idempotent producer, after which it cannot be used, stops the application so the orchestrator
-  restarts it with a new producer.
+- A fatal error of the idempotent producer (e.g. an unrecoverable sequence or epoch error), after which it cannot be
+  used, does not stop the application, which would take the synchronous purchase path down for a messaging error:
+  `KafkaProducerProvider` disposes the producer and builds a new one with the same settings and telemetry (the Aspire
+  integration's factory), and the cycle that failed backs off as after any failure. The row stays unpublished and is
+  sent again first, so order and at-least-once delivery hold; a new producer only restarts the idempotence sequence,
+  so the failed send may also have been stored, a duplicate consumers already drop.
 - The outbox grows with every event: cleaning up published rows is not done yet and will need its own change.
 - The publisher holds a database transaction open while it sends a batch, at most about the delivery timeout when
   the broker is unreachable.

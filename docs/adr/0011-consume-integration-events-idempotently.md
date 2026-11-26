@@ -63,7 +63,8 @@ partition to it (`Seek`) and retries it after a bounded exponential backoff (`Me
 signals data it can never accept with `IntegrationEventRejectedException` (the Fraud Worker does so when its use case
 returns a failure, e.g. an invalid currency or capturing a voided purchase); it is retried like the rest today. Bounded
 retries and a dead-letter topic will plug into this loop and route these, and the messages that keep failing, there.
-A fatal Kafka error stops the application so the orchestrator restarts it, as for the producer.
+A fatal error of the Kafka consumer stops the application so the orchestrator restarts it. A fatal error of the
+producer while dead-lettering does not: the producer is replaced and the send retried, as in the outbox (ADR 0010).
 
 **Health check off by default.** As for the producer (ADR 0010), the integration's Kafka health check is disabled
 unless `Aspire:Confluent:Kafka:Consumer:DisableHealthChecks` is set: a Kafka outage only delays processing, as the
