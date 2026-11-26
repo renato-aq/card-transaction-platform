@@ -1,3 +1,6 @@
+using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
+
 using CardPlatform.Messaging.Kafka;
 using CardPlatform.Messaging.Tests.Infrastructure;
 
@@ -185,6 +188,104 @@ public sealed class KafkaProducerProviderTests
         delivery.SetResult(new DeliveryResult<string, byte[]> { Message = Message });
         await onRetired;
         Assert.Equal(1, retiredFake.DisposeCount);
+    }
+
+    [Fact]
+    public async Task Under_concurrent_sends_fatal_errors_and_resets_no_producer_is_used_or_disposed_under_a_send()
+    {
+        const int Senders = 8;
+        const int SendsPerSender = 10_000;
+        ConcurrentQueue<(FakeProducer Fake, StrongBox<int> DisposedUnderSend)> created = new();
+        ConcurrentQueue<Exception> unexpected = new();
+        int fatalErrors = 0;
+        KafkaProducerProvider provider = new(
+            () =>
+            {
+                StrongBox<int> disposedUnderSend = new();
+                FakeProducer? fake = null;
+                (IProducer<string, byte[]> producer, fake) = FakeProducer.Create(
+                    $"producer-{created.Count}",
+                    async message =>
+                    {
+                        // Completes at once, after a yield or after a short delay, so sends overlap retirements.
+                        int roll = Random.Shared.Next(100);
+                        if (roll < 2)
+                        {
+                            await Task.Delay(1);
+                        }
+                        else if (roll < 60)
+                        {
+                            await Task.Yield();
+                        }
+
+                        if (fake!.Disposed)
+                        {
+                            Interlocked.Increment(ref disposedUnderSend.Value);
+                        }
+
+                        return roll >= 99
+                            ? throw FakeProducer.FatalError()
+                            : new DeliveryResult<string, byte[]> { Message = message };
+                    });
+                created.Enqueue((fake, disposedUnderSend));
+                return producer;
+            },
+            NullLogger<KafkaProducerProvider>.Instance);
+
+        using CancellationTokenSource sendersDone = new();
+        Task resets = Task.Run(async () =>
+        {
+            // Another caller reporting the current producer as broken, at random moments.
+            while (!sendersDone.IsCancellationRequested)
+            {
+                provider.Reset(provider.Current, FakeProducer.FatalError());
+                Thread.SpinWait(Random.Shared.Next(5_000));
+                await Task.Yield();
+            }
+        });
+        Task[] senders =
+        [
+            .. Enumerable.Range(0, Senders).Select(_ => Task.Run(async () =>
+            {
+                for (int i = 0; i < SendsPerSender; i++)
+                {
+                    try
+                    {
+                        await provider.ProduceAsync("topic", Message, CancellationToken.None);
+                    }
+                    catch (KafkaException exception) when (exception.Error.IsFatal)
+                    {
+                        Interlocked.Increment(ref fatalErrors);
+                    }
+#pragma warning disable CA1031 // Any other failure, e.g. a fake producer used after its disposal, fails the test below.
+                    catch (Exception exception)
+#pragma warning restore CA1031
+                    {
+                        unexpected.Enqueue(exception);
+                    }
+                }
+            })),
+        ];
+        await Task.WhenAll(senders);
+        await sendersDone.CancelAsync();
+        await resets;
+
+        Assert.Empty(unexpected);
+        Assert.True(fatalErrors > 0);
+        Assert.True(created.Count > Senders);
+        Assert.All(created, static entry => Assert.Equal(0, entry.Fake.UsedAfterDispose));
+        Assert.All(created, static entry => Assert.Equal(0, entry.DisposedUnderSend.Value));
+
+        // Every send completed: each retired producer was disposed exactly once, and the current one not at all.
+        IProducer<string, byte[]> current = provider.Current;
+        FakeProducer currentFake = (FakeProducer)current;
+        Assert.Equal(0, currentFake.DisposeCount);
+        Assert.All(
+            created.Where(entry => !ReferenceEquals(entry.Fake, currentFake)),
+            static entry => Assert.Equal(1, entry.Fake.DisposeCount));
+
+        provider.Dispose();
+        Assert.Equal(1, currentFake.DisposeCount);
     }
 
     [Fact]
