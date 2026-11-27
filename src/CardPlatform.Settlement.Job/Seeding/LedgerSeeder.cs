@@ -25,6 +25,11 @@ namespace CardPlatform.Settlement.Job.Seeding;
 /// in-memory pass over the generator, which returns the same purchases every time, so accounts are written once with
 /// their final balance. Transaction ids are UUID v7 derived from the transaction instant, as the ledger does.
 /// </para>
+/// <para>
+/// Before the commit, the three tables are analyzed (<c>ANALYZE</c>), so the planner has statistics for the new rows right
+/// away instead of whenever autovacuum gets to them, and a settlement run right after a seed gets the same plans every
+/// time.
+/// </para>
 /// </remarks>
 public sealed partial class LedgerSeeder(NpgsqlDataSource dataSource, ILogger<LedgerSeeder> logger)
 {
@@ -39,6 +44,9 @@ public sealed partial class LedgerSeeder(NpgsqlDataSource dataSource, ILogger<Le
 
     /// <summary>Purchases written per <c>COPY</c>; progress is reported after each batch.</summary>
     public const int BatchSize = 100_000;
+
+    /// <summary>The tables the seed loads, analyzed at the end of the seed.</summary>
+    public const string AnalyzedTables = LedgerSchema.Accounts + ", " + LedgerSchema.Transactions + ", " + LedgerSchema.Entries;
 
     private static readonly TimeSpan TopUpTimeOfDay = TimeSpan.FromHours(12);
 
@@ -65,6 +73,7 @@ public sealed partial class LedgerSeeder(NpgsqlDataSource dataSource, ILogger<Le
                 long topUps = await WriteTopUpsAsync(connection, plan, options.Currency, generator, cancellationToken)
                     .ConfigureAwait(false);
                 await WritePurchasesAsync(connection, plan, options, generator, cancellationToken).ConfigureAwait(false);
+                await AnalyzeAsync(connection, cancellationToken).ConfigureAwait(false);
 
                 await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -73,6 +82,25 @@ public sealed partial class LedgerSeeder(NpgsqlDataSource dataSource, ILogger<Le
                 return result;
             }
         }
+    }
+
+    // Right after a bulk load the planner has no statistics for the new rows until autovacuum analyzes the tables, some
+    // time later; until then the settlement queries can get far worse plans. Analyzing in the seed makes the state after
+    // a seed the same every time. It runs in the seed's transaction, which counts its own new rows. If the seed fails
+    // after the analysis and rolls back, its rows and their pg_stats entries are gone, but pg_class.reltuples/relpages
+    // and last_analyze survive the rollback: the tables keep inflated row estimates until the next vacuum or analyze.
+    private async Task AnalyzeAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        long startedAt = Stopwatch.GetTimestamp();
+
+        NpgsqlCommand command = new("ANALYZE " + AnalyzedTables, connection) { CommandTimeout = (int)CopyTimeout.TotalSeconds };
+        await using (command.ConfigureAwait(false))
+        {
+            await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        TimeSpan elapsed = Stopwatch.GetElapsedTime(startedAt);
+        LogAnalyzed(AnalyzedTables, elapsed);
     }
 
     private static async Task WriteAccountsAsync(
@@ -318,6 +346,9 @@ public sealed partial class LedgerSeeder(NpgsqlDataSource dataSource, ILogger<Le
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Seeded {Written} of {Total} purchases")]
     private partial void LogProgress(long written, long total);
+
+    [LoggerMessage(Level = LogLevel.Information, Message = "Analyzed the ledger tables {Tables} in {Elapsed}")]
+    private partial void LogAnalyzed(string tables, TimeSpan elapsed);
 
     [LoggerMessage(
         Level = LogLevel.Information,

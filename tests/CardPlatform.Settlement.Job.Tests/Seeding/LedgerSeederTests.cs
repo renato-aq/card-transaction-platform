@@ -26,6 +26,8 @@ public sealed class LedgerSeederTests(LedgerDatabaseFixture database)
         Currency: "BRL",
         Seed: 7);
 
+    private static readonly string[] LoadedTables = [LedgerSchema.Accounts, LedgerSchema.Transactions, LedgerSchema.Entries];
+
     [Fact]
     public async Task Seed_writes_exactly_the_requested_number_of_transactions_all_on_the_given_date()
     {
@@ -159,6 +161,40 @@ public sealed class LedgerSeederTests(LedgerDatabaseFixture database)
         List<(Guid Id, decimal Balance, string RowVersion)> after = await AccountsAsync(connectionString);
         Assert.Equal(before.Count + second.Accounts, after.Count);
         Assert.All(before, account => Assert.Contains(account, after));
+    }
+
+    [Fact]
+    public async Task Seed_analyzes_the_tables_it_loaded_so_the_planner_has_their_statistics()
+    {
+        string connectionString = await database.CreateDatabaseAsync();
+
+        await SeedAsync(connectionString, SmallSeed);
+
+        // last_analyze is set by a manual ANALYZE only (autovacuum sets last_autoanalyze), and the row estimates of the
+        // planner match the tables: the tables are small enough for ANALYZE to read every row.
+        List<(string Table, DateTimeOffset? LastAnalyze, long EstimatedRows)> statistics = await LedgerDatabase.ListAsync(
+            connectionString,
+            """
+            SELECT s.relname, s.last_analyze, c.reltuples::bigint
+            FROM pg_stat_user_tables AS s
+            JOIN pg_class AS c ON c.oid = s.relid
+            WHERE s.schemaname = current_schema() AND s.relname = ANY($1)
+            ORDER BY s.relname
+            """,
+            static reader => (
+                reader.GetString(0),
+                reader.IsDBNull(1) ? (DateTimeOffset?)null : reader.GetFieldValue<DateTimeOffset>(1),
+                reader.GetInt64(2)),
+            (object)LoadedTables);
+
+        Assert.Equal(["accounts", "entries", "transactions"], statistics.Select(table => table.Table));
+        foreach ((string table, DateTimeOffset? lastAnalyze, long estimatedRows) in statistics)
+        {
+            Assert.NotNull(lastAnalyze);
+            Assert.Equal(
+                await LedgerDatabase.ScalarAsync<long>(connectionString, $"SELECT count(*) FROM {table}"),
+                estimatedRows);
+        }
     }
 
     [Fact]
