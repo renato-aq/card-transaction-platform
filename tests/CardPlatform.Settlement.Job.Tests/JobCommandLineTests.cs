@@ -172,6 +172,90 @@ public sealed class JobCommandLineTests
         Assert.False(string.IsNullOrWhiteSpace(error));
     }
 
+    [Theory]
+    [InlineData("run", "--date", "2026-11-20", "--output", "out", "--metrics-output", "out/settlement-20261120-BRL.txt")]
+    [InlineData("run", "--metrics-output=out/settlement-20261120-BRL.txt", "--output=out", "--date=2026-11-20")]
+    [InlineData("--date", "2026-11-20", "--output", "out", "--metrics-output", "out/settlement-20261120-BRL.txt")]
+    [InlineData("run", "--date", "2026-11-20", "--output", "out", "--metrics-output", "./out/../out/./settlement-20261120-BRL.txt")]
+    [InlineData("run", "--date", "2026-11-20", "--output", "out/", "--metrics-output", "out/settlement-20261120-BRL.txt")]
+    [InlineData("run", "--date", "2026-11-20", "--output", "./x/../out", "--metrics-output", "out/settlement-20261120-BRL.txt")]
+    [InlineData("run", "--currency", "USD", "--metrics-output", "settlement-files/settlement-20261125-USD.txt")]
+    public void A_metrics_output_that_is_the_settlement_file_is_rejected_with_an_error(params string[] args)
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(args, Yesterday, out string? error);
+
+        Assert.Null(commandLine);
+        Assert.NotNull(error);
+        Assert.Contains("'--metrics-output'", error, StringComparison.Ordinal);
+        string settlementFile = args.Contains("USD")
+            ? Path.GetFullPath("settlement-files/settlement-20261125-USD.txt")
+            : Path.GetFullPath("out/settlement-20261120-BRL.txt");
+        Assert.Contains(settlementFile, error, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_metrics_output_that_is_the_settlement_file_is_rejected_given_as_relative_or_absolute()
+    {
+        string outputDirectory = Path.Combine(Path.GetTempPath(), "settlement-out");
+        string absolute = Path.Combine(Path.GetTempPath(), "other", "..", "settlement-out", ".", "settlement-20261120-BRL.txt");
+        string relative = Path.GetRelativePath(Directory.GetCurrentDirectory(), Path.Combine(outputDirectory, "settlement-20261120-BRL.txt"));
+
+        JobCommandLine? withAbsolute = JobCommandLine.Parse(
+            ["run", "--date", "2026-11-20", "--output", outputDirectory, "--metrics-output", absolute], Yesterday, out string? absoluteError);
+        JobCommandLine? withRelative = JobCommandLine.Parse(
+            ["run", "--date", "2026-11-20", "--output", outputDirectory, "--metrics-output", relative], Yesterday, out string? relativeError);
+
+        Assert.Null(withAbsolute);
+        Assert.Contains("'--metrics-output'", absoluteError, StringComparison.Ordinal);
+        Assert.Null(withRelative);
+        Assert.Contains("'--metrics-output'", relativeError, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void A_metrics_output_differing_from_the_settlement_file_only_in_case_is_rejected_where_file_names_ignore_case()
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(
+            ["run", "--date", "2026-11-20", "--output", "out", "--metrics-output", "OUT/Settlement-20261120-BRL.TXT"],
+            Yesterday,
+            out string? error);
+
+        // The default file systems of Windows and macOS ignore case; those of Linux do not.
+        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS())
+        {
+            Assert.Null(commandLine);
+            Assert.Contains("'--metrics-output'", error, StringComparison.Ordinal);
+        }
+        else
+        {
+            Assert.Null(error);
+            Assert.Equal("OUT/Settlement-20261120-BRL.TXT", commandLine?.Run?.MetricsOutputPath);
+        }
+    }
+
+    [Theory]
+    [InlineData("out/metrics.json")]
+    [InlineData("out/settlement-20261121-BRL.txt")] // the file of another day
+    [InlineData("out/settlement-20261120-USD.txt")] // the file of another currency
+    [InlineData("out/settlement-20261120-BRL.txt.json")]
+    [InlineData("other/settlement-20261120-BRL.txt")]
+    public void A_metrics_output_next_to_the_settlement_file_is_accepted(string metricsOutput)
+    {
+        JobCommandLine? commandLine = JobCommandLine.Parse(
+            ["run", "--date", "2026-11-20", "--output", "out", "--metrics-output", metricsOutput], Yesterday, out string? error);
+
+        Assert.Null(error);
+        Assert.Equal(metricsOutput, commandLine?.Run?.MetricsOutputPath);
+    }
+
+    [Fact]
+    public async Task A_metrics_output_that_is_the_settlement_file_exits_with_the_invalid_arguments_code()
+    {
+        int exitCode = await SettlementJobHost.RunAsync(
+            ["run", "--date", "2026-11-20", "--output", "out", "--metrics-output", "out/settlement-20261120-BRL.txt"]);
+
+        Assert.Equal(ExitCodes.InvalidArguments, exitCode);
+    }
+
     [Fact]
     public void A_run_without_strategy_or_page_size_uses_the_optimized_strategy_and_the_default_page_size()
     {

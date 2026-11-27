@@ -393,6 +393,68 @@ public sealed class RunCommandTests(LedgerDatabaseFixture database) : IDisposabl
         Assert.Empty(Directory.GetFiles(metricsDirectory));
     }
 
+    [Theory]
+    [InlineData("literal")]
+    [InlineData("relative segments")]
+    [InlineData("output with a trailing separator")]
+    public async Task A_metrics_output_that_is_the_settlement_file_is_rejected_before_the_run_and_leaves_the_file_untouched(string form)
+    {
+        string connectionString = await database.CreateDatabaseAsync();
+        await KnownDay.ArrangeAsync(connectionString);
+        string settlementFile = SettlementFilePath("20261120", "BRL");
+        Directory.CreateDirectory(_outputDirectory);
+        byte[] existing = "a settlement file of an earlier run\n"u8.ToArray();
+        await File.WriteAllBytesAsync(settlementFile, existing);
+        (string outputDirectory, string metricsOutput) = form switch
+        {
+            "literal" => (_outputDirectory, settlementFile),
+            "relative segments" => (_outputDirectory, Path.Combine(_outputDirectory, "metrics", "..", ".", "settlement-20261120-BRL.txt")),
+            _ => (_outputDirectory + Path.DirectorySeparatorChar, settlementFile),
+        };
+        using CapturedLogs logs = new();
+
+        (int exitCode, string standardError) = await CaptureStandardErrorAsync(() => RunAsync(
+            connectionString,
+            logs,
+            "--date",
+            "2026-11-20",
+            "--output",
+            outputDirectory,
+            "--metrics-output",
+            metricsOutput));
+
+        Assert.Equal(ExitCodes.InvalidArguments, exitCode);
+        Assert.Contains(
+            $"Invalid value '{metricsOutput}' for option '--metrics-output': {settlementFile} is the settlement file of this run",
+            standardError,
+            StringComparison.Ordinal);
+        Assert.Contains("Usage:", standardError, StringComparison.Ordinal);
+
+        // Nothing ran: no log, the earlier file is intact, and no metrics file or temporary file was created.
+        Assert.Empty(logs.Entries);
+        Assert.Equal(existing, await File.ReadAllBytesAsync(settlementFile));
+        Assert.Equal([settlementFile], Directory.GetFiles(_outputDirectory, "*", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task A_metrics_output_in_the_directory_of_the_settlement_file_writes_both_files()
+    {
+        string connectionString = await database.CreateDatabaseAsync();
+        await KnownDay.ArrangeAsync(connectionString);
+        string metricsPath = Path.Combine(_outputDirectory, "settlement-20261120-BRL.json");
+
+        int exitCode = await RunAsync(connectionString, "--date", "2026-11-20", "--metrics-output", metricsPath);
+
+        Assert.Equal(ExitCodes.Success, exitCode);
+        string settlementFile = SettlementFilePath("20261120", "BRL");
+        Assert.Equal(Record("9000000005000000000000254150"), ReadLines(settlementFile)[^1]);
+        using JsonDocument json = JsonDocument.Parse(await File.ReadAllTextAsync(metricsPath));
+        Assert.Equal(5L, json.RootElement.GetProperty("recordCount").GetInt64());
+        Assert.Equal(
+            [metricsPath, settlementFile],
+            Directory.GetFiles(_outputDirectory).Order(StringComparer.Ordinal));
+    }
+
     [Fact]
     public async Task Run_without_a_strategy_uses_the_optimized_one()
     {
@@ -423,6 +485,24 @@ public sealed class RunCommandTests(LedgerDatabaseFixture database) : IDisposabl
                 UseLedgerDatabase(builder, connectionString);
                 builder.Logging.AddProvider(logs);
             });
+    }
+
+    // The job writes an invalid command line to the standard error. Other test classes may write to it at the same
+    // time, so the capture is synchronized and only checked with Contains.
+    private static async Task<(int ExitCode, string StandardError)> CaptureStandardErrorAsync(Func<Task<int>> run)
+    {
+        TextWriter original = Console.Error;
+        using StringWriter captured = new(CultureInfo.InvariantCulture);
+        Console.SetError(TextWriter.Synchronized(captured));
+        try
+        {
+            int exitCode = await run();
+            return (exitCode, captured.ToString());
+        }
+        finally
+        {
+            Console.SetError(original);
+        }
     }
 
     private static void UseLedgerDatabase(HostApplicationBuilder builder, string connectionString)

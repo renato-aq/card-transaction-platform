@@ -1,5 +1,7 @@
 using System.Globalization;
 
+using CardPlatform.Settlement.Job.FileLayout;
+
 namespace CardPlatform.Settlement.Job.Generation;
 
 /// <summary>Parameters of the <c>run</c> command, which writes the settlement file of one date and one currency.</summary>
@@ -8,7 +10,8 @@ namespace CardPlatform.Settlement.Job.Generation;
 /// <param name="OutputDirectory">Directory of the file; a relative path is resolved against the working directory.</param>
 /// <param name="MetricsOutputPath">
 /// File to write the metrics of the run to, as JSON (<see cref="Measurement.RunMetrics"/>), or <see langword="null"/>
-/// to only log them; a relative path is resolved against the working directory.
+/// to only log them; a relative path is resolved against the working directory. <see cref="Parse"/> rejects the path of
+/// the settlement file itself.
 /// </param>
 /// <param name="Strategy">
 /// Name of the <see cref="ISettlementFileGenerator"/> that writes the file: <c>optimized</c>
@@ -148,6 +151,14 @@ public sealed record RunOptions(
             options = updated;
         }
 
+        // Checked once every option is read: the settlement file's name depends on the date and the currency.
+        if (options.MetricsOutputPath is not null && IsSettlementFilePath(options, options.MetricsOutputPath))
+        {
+            error = $"Invalid value '{options.MetricsOutputPath}' for option '--metrics-output': "
+                + $"{Path.GetFullPath(options.MetricsOutputPath)} is the settlement file of this run; give another file.";
+            return null;
+        }
+
         error = null;
         return options;
     }
@@ -174,6 +185,31 @@ public sealed record RunOptions(
     private static bool IsOptionName(string name)
     {
         return name is "date" or "currency" or "output" or "metrics-output" or "strategy" or "page-size" or "parallelism";
+    }
+
+    /// <summary>
+    /// Whether <paramref name="path"/> resolves to the settlement file the run writes
+    /// (<see cref="SettlementFileWriter.FileName"/> in <see cref="OutputDirectory"/>), both resolved against the working
+    /// directory as the run resolves them. Paths that differ only in case are the same file on Windows and macOS, whose
+    /// file systems ignore case by default; on Linux they are different files.
+    /// </summary>
+    private static bool IsSettlementFilePath(RunOptions options, string path)
+    {
+        StringComparison comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        try
+        {
+            string settlementFile = Path.GetFullPath(Path.Combine(
+                Path.GetFullPath(options.OutputDirectory),
+                SettlementFileWriter.FileName(new SettlementHeader(options.Date, options.Currency))));
+            return string.Equals(Path.GetFullPath(path), settlementFile, comparison);
+        }
+        catch (ArgumentException)
+        {
+            // Paths that cannot be resolved are left to the run, which fails on them as before, with a logged error.
+            return false;
+        }
     }
 
     private static bool IsStrategy(string value)
