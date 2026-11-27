@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # Personal planning notes (not published)
 PLANEJAMENTO.md
+
+# Settlement files written by the settlement job (default output directory)
+settlement-files/

@@ -78,3 +78,9 @@ it was written.
   decisions to integration events and writes them through an outbox port (`IOutbox`, ADR 0010). The Domain still
   does not depend on the contracts (`Domain_does_not_depend_on_integration_contracts`), and
   `CardPlatform.Messaging` (the outbox and Kafka plumbing) is referenced only by Infrastructure.
+
+## Amendment (2026-11-26)
+
+"Read-only" above describes the settlement run, not the whole Settlement Job. Its `run` command only reads the Ledger's
+tables; its `seed` command is a development tool that bulk-loads generated test data into those same tables, so the
+run has millions of rows to be measured against. How the run reads and writes the file is recorded in ADR 0013.

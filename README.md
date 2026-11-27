@@ -20,23 +20,24 @@ flowchart LR
     fraud -->|"history + FraudSuspected,<br/>one transaction"| frauddb[("frauddb<br/>outbox_messages")]
     frauddb -->|"outbox publisher"| signals{{"Kafka: fraud-signals"}}
     signals -->|"FraudSuspected:<br/>block the card"| auth
-    ledgerdb -.-> settlement[Settlement Job]
-    settlement -.-> file[/Daily settlement file/]
+    ledgerdb -->|"merchant credits<br/>of the day"| settlement[Settlement Job]
+    settlement --> file[/Daily settlement file/]
 ```
 
-Solid arrows are implemented; dotted arrows are the next phases (see the [roadmap](#roadmap)). A purchase is
-**authorized** first, which places a **hold** on the card balance in the Ledger, and **captured** (the money goes to
-the merchant) or **voided** (the money goes back to the card) later; see [Authorization](#authorization). Every
-decision is also an event: it is saved in the Authorization's outbox with the decision and published to Kafka, the
-Fraud Worker judges each approved purchase by its [fraud rules](#fraud-worker), and a suspicion comes back as a
-`FraudSuspected` event that blocks the card; see [Events and messaging](#events-and-messaging).
+A purchase is **authorized** first, which places a **hold** on the card balance in the Ledger, and **captured** (the
+money goes to the merchant) or **voided** (the money goes back to the card) later; see [Authorization](#authorization).
+Every decision is also an event: it is saved in the Authorization's outbox with the decision and published to Kafka,
+the Fraud Worker judges each approved purchase by its [fraud rules](#fraud-worker), and a suspicion comes back as a
+`FraudSuspected` event that blocks the card; see [Events and messaging](#events-and-messaging). The Settlement Job, a
+batch started on demand, reads one day's credits to merchant accounts from `ledgerdb` and writes them to a fixed-width
+settlement file; see [Settlement Job](#settlement-job).
 
 | Service | Responsibility |
 |---|---|
 | **Authorization API** | Approves or declines card purchases with low latency, idempotent by `Idempotency-Key`; captures and voids them; publishes every decision; blocks cards on `FraudSuspected` |
 | **Ledger API** | Double-entry bookkeeping, balances and authorization holds |
 | **Fraud Worker** | Consumes the authorization events idempotently into a purchase history per card; flags suspicious purchases on `fraud-signals` |
-| **Settlement Job** | Generates the daily settlement file in batches from the ledger |
+| **Settlement Job** | Batch started on demand: writes the daily settlement file of the merchants' credits from the ledger, streaming it page by page, optionally in parallel |
 
 Shared projects: `ServiceDefaults` (OpenTelemetry, health checks, resilience, service discovery), `Contracts`
 (integration events, their envelope, serializer and topics) and `Messaging` (transactional outbox and its Kafka
@@ -77,7 +78,8 @@ messages with their keys and headers, and the consumer groups.
 
 Run the tests (the Ledger and Authorization API integration tests use [Testcontainers](https://testcontainers.com/) to start a
 real PostgreSQL, so the container runtime must be running; the Authorization integration tests also run the real Ledger
-API in process, with its own database, and the outbox publisher, consumer, Fraud Worker and end-to-end tests also start a Kafka broker):
+API in process, with its own database, the Settlement Job tests also use a Testcontainers PostgreSQL, and the outbox
+publisher, consumer, Fraud Worker and end-to-end tests also start a Kafka broker):
 
 ```bash
 dotnet test
@@ -569,6 +571,118 @@ Limits of this design:
 - Changing the limits only affects purchases judged afterwards; past purchases are not judged again.
 - Two purchases of a card authorized at nearly the same time and consumed out of order may not count each other.
 
+## Settlement Job
+
+The Settlement Job (`CardPlatform.Settlement.Job`) is a batch: each run writes the settlement file of one UTC day and
+one currency, then exits. Its `run` command reads the Ledger's tables in `ledgerdb` directly and only reads them (the
+`seed` command, described below, is a development tool that bulk-loads test data into those tables); it is the one
+component that does not follow the hexagonal layering, because it is a read-only, performance-critical workload
+([ADR 0004, amendment](docs/adr/0004-use-hexagonal-architecture-with-pragmatic-cqrs.md)).
+
+A detail record is each **credit entry to a `merchant` account** in the currency whose transaction was created within
+the UTC day `[date 00:00, next day 00:00)`: a captured authorization or a direct purchase, what the merchant is owed.
+Details are ordered by merchant account id, then transaction id, then entry id (as PostgreSQL compares them). The file
+is written under a temporary name and moved to `settlement-<yyyyMMdd>-<currency>.txt` only when complete, replacing
+the file of an earlier run; a failed run leaves no file.
+
+### File layout
+
+Fixed width, ASCII: every record is 117 characters followed by `\n` (the last one too). Numbers are right-aligned and
+zero-padded; characters not covered by a field are spaces. Positions start at 1.
+
+| Record | Positions | Field |
+|---|---|---|
+| Header (`0`), first line | 1 | record type `0` |
+| | 2–9 | settlement date, `yyyyMMdd` |
+| | 10–12 | currency, ISO 4217 |
+| Detail (`1`), one per record | 1 | record type `1` |
+| | 2–10 | sequence number, from 1 |
+| | 11–46 | transaction id, lowercase hyphenated UUID |
+| | 47–82 | merchant account id, lowercase hyphenated UUID |
+| | 83–97 | amount in minor units of the currency (cents for BRL) |
+| | 98–117 | transaction instant in UTC, `yyyyMMddHHmmssffffff` |
+| Trailer (`9`), last line | 1 | record type `9` |
+| | 2–10 | number of detail records |
+| | 11–28 | sum of the detail amounts, in minor units |
+
+`FileLayout/SettlementFileLayout.cs` is the single declaration of these positions.
+
+### Strategies
+
+([ADR 0013](docs/adr/0013-generate-the-settlement-file-by-streaming-merchant-partitions-in-parallel.md)) Both
+strategies write the same file, byte for byte (checked by the tests and by the [benchmark](docs/benchmarks.md), which
+compares the SHA-256 of every file):
+
+- **`naive`**, version 1, the baseline: one EF Core query with `Include` and change tracking loads every record of the
+  day into memory, then the file is written. Memory grows with the number of records.
+- **`optimized`**, version 2, the default: reads the merchants in id order and each merchant's entries in pages with
+  keyset pagination (`(transaction_id, id) > (…)`, never `OFFSET`), as untracked rows streamed to the file in batches,
+  inside one repeatable-read snapshot. It relies on the index `ix_entries_account_id_transaction_id_id` of the Ledger.
+  With `--parallelism` above 1 the merchants are split into contiguous ranges read at the same time, each on its own
+  connection importing the same exported snapshot, and joined in order with the sequence numbers applied at the join.
+  Memory depends on the page size and the parallelism, not on the number of records.
+
+### Running it
+
+**From the Aspire dashboard:** the `settlement-job` resource is not started with the platform. Its Start button runs it
+once with the defaults (yesterday UTC, BRL, `optimized`, parallelism 4), with the `ledgerdb` connection string provided
+by the AppHost; the file lands in `src/CardPlatform.Settlement.Job/settlement-files/` (ignored by git) and the run
+summary is in the resource's logs.
+
+**From the command line**, against any database with the Ledger schema, with the connection string in
+`ConnectionStrings__ledgerdb`. For example, against the disposable PostgreSQL of the
+[benchmark's reproduction steps](docs/benchmarks.md#how-to-reproduce) (steps 1 and 2), load 200,000 purchases on a
+day and settle it:
+
+```bash
+export ConnectionStrings__ledgerdb='Host=127.0.0.1;Port=55432;Database=ledgerdb;Username=postgres'
+dotnet run --project src/CardPlatform.Settlement.Job -- seed --transactions 200000 --date 2026-11-20
+dotnet run --project src/CardPlatform.Settlement.Job -- run --date 2026-11-20 --metrics-output settlement-files/metrics.json
+```
+
+Relative paths are resolved against the working directory, which `dotnet run` sets to the project directory: the file
+is written to `src/CardPlatform.Settlement.Job/settlement-files/settlement-20261120-BRL.txt` and the metrics next to it
+(both ignored by git). The run ends with a summary, the same values as the JSON of `--metrics-output`:
+
+```
+Run summary: strategy optimized, date 2026-11-20, currency BRL, 200000 records, file 23600236 bytes, elapsed <ms> ms, CPU <ms> ms, peak working set <bytes> bytes, allocated <bytes> bytes, parallelism 4
+```
+
+| Command | Options (defaults) |
+|---|---|
+| `run`, also the default with no command | `--date yyyy-MM-dd` (yesterday, UTC), `--currency <code>` (`BRL`), `--output <dir>` (`settlement-files`), `--metrics-output <file>` (only logged), `--strategy naive\|optimized` (`optimized`), `--page-size <n>` (10000, optimized only), `--parallelism <n>` (4, optimized only; one database connection each) |
+| `seed` | `--transactions <n>` (5000000), `--merchants <n>` (1000), `--cards <n>` (100000), `--date yyyy-MM-dd` (yesterday, UTC), `--currency <code>` (`BRL`), `--seed <n>` (42) |
+
+`seed` loads generated purchases straight into the ledger tables with binary `COPY`, in one database transaction,
+bypassing the Ledger API: its own settlement account, merchants and cards, each card funded by a top-up dated the day
+before, every purchase a debit of a card and a credit of a merchant at an instant of the day, uniformly spread over
+the merchants and cards. It keeps the ledger invariants (balanced transactions, stored balances equal to the entries)
+and ends with `ANALYZE` of the three tables, so the planner has statistics right away. The schema must exist (apply
+the Ledger migrations first; the Ledger API applies them on startup in Development), or `seed` fails with a message
+saying so. The same options generate the same amounts, merchants and instants; ids are UUID v7, whose random part
+differs from one seed to the next.
+
+Exit codes: `0` success, `1` the command failed (the reason is logged; a failed run leaves no settlement file, except
+when only writing `--metrics-output` failed), `2` invalid command line (the usage is written to the standard error).
+
+### Results
+
+Median of 5 runs over a seeded day of **5,000,000 records** (1,000 merchants), the job on an Apple M4 laptop and
+PostgreSQL 18.6 in a local container; full environment, method, every run and the limits of these numbers in
+[docs/benchmarks.md](docs/benchmarks.md):
+
+| Strategy | Elapsed | Peak working set | CPU time (job) |
+|---|---|---|---|
+| `naive` | 38.8 s | 5,919.8 MiB | 36.8 s |
+| `optimized`, parallelism 1 | 48.9 s | 148.9 MiB | 10.0 s |
+| `optimized`, parallelism 4 (default) | 22.0 s | 152.1 MiB | 10.8 s |
+| `optimized`, parallelism 8 | 18.0 s | 152.4 MiB | 10.9 s |
+
+The optimized strategy keeps memory flat, about 39 times below `naive`, and all four files are identical. It is
+faster only with parallel partitions (1.76 times at 4, 2.16 times at 8); reading sequentially it is 26% slower than
+`naive` at this volume, and its time grows with the merchants' whole history, not only the settled day (see the
+document's limitations).
+
 ## Demo
 
 With the platform running (`aspire run`) and the variables of the [Ledger API](#ledger-api) and
@@ -748,7 +862,7 @@ src/
   CardPlatform.Fraud.Application/     Fraud use cases and ports
   CardPlatform.Fraud.Infrastructure/  EF Core, PostgreSQL (frauddb), migrations, outbox, authorization event handlers
   CardPlatform.Fraud.Worker/          Fraud Worker host (composition root)
-  CardPlatform.Settlement.Job/        Settlement batch (next phase)
+  CardPlatform.Settlement.Job/        Settlement batch: seed and run commands, file layout, naive and optimized strategies, run metrics
 tests/
   CardPlatform.Architecture.Tests/    Dependency rule between the Ledger, Authorization and Fraud layers
   CardPlatform.Contracts.Tests/       Envelope round trips, serializer, event types, topics, NameBasedGuid
@@ -764,7 +878,9 @@ tests/
   CardPlatform.Fraud.Application.Tests/
   CardPlatform.Fraud.Worker.Tests/    Worker host against Testcontainers PostgreSQL and Kafka (migrations, idempotent consumption, fraud signals)
   CardPlatform.EndToEnd.Tests/        Authorization, Ledger and Fraud Worker in process against Testcontainers PostgreSQL and Kafka
+  CardPlatform.Settlement.Job.Tests/  File layout, command line, seed, both strategies (same file) and parallel runs against Testcontainers PostgreSQL
 docs/adr/                             Architecture Decision Records
+docs/benchmarks.md                    Settlement Job benchmark: environment, method, results and how to reproduce them
 ```
 
 ## Roadmap
@@ -774,7 +890,7 @@ docs/adr/                             Architecture Decision Records
 - [x] Authorization API: idempotent authorization flow with holds, capture and void
 - [x] Transactional outbox + Kafka integration events
 - [x] Fraud Worker: rule-based detection
-- [ ] Settlement Job: batched file generation with before/after benchmarks
+- [x] Settlement Job: batched file generation with before/after [benchmarks](docs/benchmarks.md)
 - [x] Integration tests with Testcontainers
 - [ ] Load tests with k6 and published results
 - [ ] Kubernetes manifests
@@ -795,3 +911,4 @@ See [docs/adr](docs/adr) for the reasoning behind the main technical choices:
 10. [Publish integration events through a transactional outbox](docs/adr/0010-publish-integration-events-through-a-transactional-outbox.md)
 11. [Consume integration events idempotently](docs/adr/0011-consume-integration-events-idempotently.md)
 12. [Judge purchases by fraud rules at approval](docs/adr/0012-judge-purchases-by-fraud-rules-at-approval.md)
+13. [Generate the settlement file by streaming merchant partitions in parallel](docs/adr/0013-generate-the-settlement-file-by-streaming-merchant-partitions-in-parallel.md)

@@ -33,5 +33,6 @@
     <Project Path="tests/CardPlatform.Ledger.Application.Tests/CardPlatform.Ledger.Application.Tests.csproj" />
     <Project Path="tests/CardPlatform.Ledger.Domain.Tests/CardPlatform.Ledger.Domain.Tests.csproj" />
     <Project Path="tests/CardPlatform.Messaging.Tests/CardPlatform.Messaging.Tests.csproj" />
+    <Project Path="tests/CardPlatform.Settlement.Job.Tests/CardPlatform.Settlement.Job.Tests.csproj" />
   </Folder>
 </Solution>
