@@ -303,8 +303,9 @@ went from 4.0 s to 8–9 s while `naive` stayed at 4.5 s.
 - **Memory pressure.** The peak working set is the job process's resident memory as sampled by the job. On this
   16 GB machine, `naive`'s working set of 5–6 GiB coexists with the container runtime's VM of up to 8 GiB. In a
   separate run at 5,000,000 records (not one of the published runs), the macOS memory compressor grew by about
-  1.9–2.3 GiB and swap grew during the `naive` runs. So `naive`'s peak working set may understate the memory it
-  touched, and its elapsed time may include the cost of compression. This does not change the direction of any result.
+  1.9–2.3 GiB in each of its three `naive` runs, and swap grew in one of them, the first, a warm-up. So `naive`'s
+  peak working set may understate the memory it touched, and its elapsed time may include the cost of compression.
+  This does not change the direction of any result.
 - **A single seeded day.** The main database holds one day of purchases. The optimized strategy issues one query
   per merchant account and filters the date after looking up each entry's transaction, so its cost grows with every
   credit the merchants have, on every day, not only with the day being settled; see [History effect](#history-effect).

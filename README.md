@@ -609,8 +609,9 @@ zero-padded; characters not covered by a field are spaces. Positions start at 1.
 
 ### Strategies
 
-Both strategies write the same file, byte for byte (checked by the tests and by the
-[benchmark](docs/benchmarks.md), which compares the SHA-256 of every file):
+([ADR 0013](docs/adr/0013-generate-the-settlement-file-by-streaming-merchant-partitions-in-parallel.md)) Both
+strategies write the same file, byte for byte (checked by the tests and by the [benchmark](docs/benchmarks.md), which
+compares the SHA-256 of every file):
 
 - **`naive`**, version 1, the baseline: one EF Core query with `Include` and change tracking loads every record of the
   day into memory, then the file is written. Memory grows with the number of records.
@@ -910,3 +911,4 @@ See [docs/adr](docs/adr) for the reasoning behind the main technical choices:
 10. [Publish integration events through a transactional outbox](docs/adr/0010-publish-integration-events-through-a-transactional-outbox.md)
 11. [Consume integration events idempotently](docs/adr/0011-consume-integration-events-idempotently.md)
 12. [Judge purchases by fraud rules at approval](docs/adr/0012-judge-purchases-by-fraud-rules-at-approval.md)
+13. [Generate the settlement file by streaming merchant partitions in parallel](docs/adr/0013-generate-the-settlement-file-by-streaming-merchant-partitions-in-parallel.md)
